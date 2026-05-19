@@ -1,0 +1,31 @@
+:root {
+  --sans: Avenir Next, Avenir, Helvetica Neue, Helvetica, sans-serif;
+  --mono: SFMono-Regular, Consolas, Liberation Mono, Menlo, monospace;
+  font-family: var(--sans);
+  color: #1b2726;
+  background: #f4f0e8;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  min-width: 320px;
+  margin: 0;
+}
+
+button,
+input,
+textarea,
+select {
+  font-family: inherit;
+}
