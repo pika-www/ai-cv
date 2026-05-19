@@ -42,6 +42,17 @@ git status --short
 - 不要把无关重构和功能开发混在一个 commit 里。
 - 除非产品 owner 明确要求，不要 force-push 共享分支。
 
+## 命名规范
+
+参考 [ruanyf/document-style-guide](https://github.com/ruanyf/document-style-guide)：
+
+- Markdown 文件名只用小写字母、数字和连字符。
+- 文件名不能有空格，不能使用中文或全角字符。
+- `README`、`LICENSE` 这类说明文件可以保留大写。
+- 多个单词时优先使用 `kebab-case`，例如 `product-v1-scope.md`。
+- 标题层级要简洁，不要出现孤立编号。
+- 中文正文使用全角标点，英文正文使用半角标点。
+
 ## 环境变量建议
 
 运行时密钥必须放在本地环境文件或部署平台配置里，不能提交到 Git。
