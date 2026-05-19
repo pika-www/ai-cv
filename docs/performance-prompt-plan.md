@@ -1,43 +1,43 @@
-# Performance Prompt Plan
+# 性能 Prompt 计划
 
-Use this prompt before adding dependencies, heavy UI effects, file parsing, previews, or export features.
+在添加依赖、重型 UI 效果、文件解析、预览或导出功能之前，先使用这份提示词。
 
-## Role
+## 角色
 
-You are protecting frontend performance for AI CV Studio. The app handles long resumes, long job descriptions, and generated materials, so rendering must stay fast and predictable.
+你正在保护 AI CV Studio 的前端性能。这个产品会处理长简历、长 JD 和较长的生成材料，所以渲染必须保持快速、稳定、可预测。
 
-## Performance Priorities
+## 性能优先级
 
-- Keep the first load small.
-- Avoid unnecessary dependencies.
-- Avoid blocking the main thread with large text parsing.
-- Keep long generated content virtualized or paginated if needed.
-- Debounce expensive validation or matching previews.
-- Use backend processing for AI, file parsing, and export work.
+- 首次加载要轻。
+- 避免不必要的依赖。
+- 不要在主线程里做大量文本解析。
+- 如果生成内容很长，要考虑分页或虚拟列表。
+- 昂贵的校验或匹配预览要做 debounce。
+- AI、文件解析、导出等工作应该交给后端处理。
 
-## Dependency Rules
+## 依赖规则
 
-Before adding a dependency, answer:
+添加任何依赖前，先回答：
 
-- What problem does it solve?
-- Can platform APIs or existing code solve it?
-- Is it actively maintained?
-- Does it increase bundle size meaningfully?
-- Is it needed in the browser or only on the backend?
+- 它解决了什么具体问题？
+- 平台 API 或现有代码能否解决？
+- 它是否仍在维护？
+- 它是否明显增加 bundle 体积？
+- 它真的需要在浏览器里运行，还是应该放到后端？
 
-Do not add UI libraries, animation libraries, or document parsers without a clear product need.
+没有明确产品需求时，不要添加 UI 库、动画库或文档解析库。
 
-## Rendering Rules
+## 渲染规则
 
-- Do not compute large derived data inside render.
-- Memoize expensive transformations only when there is a measured or obvious cost.
-- Keep textarea and editor interactions responsive for long text.
-- Do not render all resume versions at once if version history becomes large.
+- 不要在 render 过程中计算大量派生数据。
+- 只有在成本明显或已测量时，才使用 memo 优化。
+- 长文本输入和编辑器交互必须保持流畅。
+- 如果未来有大量简历版本，不要一次性渲染所有版本。
 
-## Acceptance Criteria
+## 验收标准
 
-- `npm run build` passes.
-- No accidental large dependency is added.
-- The app remains usable on mobile.
-- Long copy does not create horizontal overflow.
-- File parsing and export work are not performed in render functions.
+- `npm run build` 通过。
+- 没有意外增加大型依赖。
+- 移动端仍然可用。
+- 长文案不会造成横向溢出。
+- 文件解析和导出逻辑不能写进 render 函数。

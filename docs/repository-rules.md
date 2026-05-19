@@ -1,31 +1,31 @@
-# Repository Rules
+# 仓库规则
 
-Follow these rules before every commit.
+每次提交前都必须遵守这些规则。
 
-## Do Not Commit
+## 不要提交
 
 - `node_modules/`
 - `dist/`
 - `.env`
 - `.env.local`
-- API keys
-- local editor settings
-- OS files such as `.DS_Store`
-- generated logs
-- temporary screenshots unless explicitly needed for documentation
+- API key
+- 本地编辑器配置
+- 系统文件，例如 `.DS_Store`
+- 生成的日志文件
+- 临时截图，除非明确要作为文档素材
 
-## Commit
+## 应该提交
 
-- Source code
-- Public static assets required by the app
+- 源代码
+- 应用需要的 public 静态资源
 - `package.json`
 - `package-lock.json`
-- TypeScript and Vite config
-- Documentation under `docs/`
+- TypeScript 和 Vite 配置
+- `docs/` 下的文档
 
-## Required Checks
+## 必跑检查
 
-Run before pushing frontend changes:
+推送前端改动前运行：
 
 ```bash
 npm run lint
@@ -33,20 +33,20 @@ npm run build
 git status --short
 ```
 
-`git status --short` must not show dependency folders or build output.
+`git status --short` 不能出现依赖目录或构建产物。
 
-## Branch and Commit Guidance
+## 分支和提交建议
 
-- Keep commits focused on one product change.
-- Use clear commit messages, for example `Add profile intake form`.
-- Do not mix unrelated refactors with feature work.
-- Never force-push shared branches unless the product owner explicitly asks.
+- 每个 commit 只处理一个清晰的产品变化。
+- commit message 要明确，例如 `Add profile intake form`。
+- 不要把无关重构和功能开发混在一个 commit 里。
+- 除非产品 owner 明确要求，不要 force-push 共享分支。
 
-## Environment Guidance
+## 环境变量建议
 
-Runtime secrets must live in local environment files and deployment settings, never in Git.
+运行时密钥必须放在本地环境文件或部署平台配置里，不能提交到 Git。
 
-Example future variables:
+未来可能需要的变量示例：
 
 ```bash
 VITE_API_BASE_URL=http://localhost:4000

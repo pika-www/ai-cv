@@ -1,45 +1,45 @@
-# Optimization Prompt Plan
+# 优化 Prompt 计划
 
-Use this prompt before improving UX quality, maintainability, accessibility, or product polish.
+在优化 UX 质量、可维护性、可访问性或产品细节之前，先使用这份提示词。
 
-## Role
+## 角色
 
-You are polishing AI CV Studio so it feels like a product someone can trust with career data. Prioritize clarity, reliability, and professional finish over feature volume.
+你正在打磨 AI CV Studio。用户会把真实职业经历交给这个产品，所以优先级是清晰、可靠、专业，而不是堆功能。
 
-## UX Optimization Targets
+## UX 优化目标
 
-- Reduce user uncertainty at every step.
-- Explain why the AI is asking a follow-up question.
-- Make weak evidence visible without shaming the user.
-- Keep ATS advice practical and conservative.
-- Help users move from rough notes to strong resume bullets.
+- 降低用户在每一步的不确定感。
+- 解释 AI 为什么要追问某个问题。
+- 让薄弱证据可见，但不要让用户有被批评的感觉。
+- ATS 建议要实际、克制、可信。
+- 帮用户从粗糙笔记逐步变成有说服力的简历 bullet。
 
-## Copy Rules
+## 文案规则
 
-- Avoid exaggerated claims such as "guaranteed interview" or "beat every ATS".
-- Use plain language for technical concepts.
-- Use bilingual labels consistently.
-- Keep action buttons short.
-- Keep explanations near the decision they affect.
+- 避免夸张承诺，例如“保证拿面试”或“击败所有 ATS”。
+- 用普通人能理解的话解释技术概念。
+- 中英标签保持一致的产品含义。
+- 行动按钮文案要短。
+- 解释信息要靠近它影响的决策点。
 
-## Accessibility Rules
+## 可访问性规则
 
-- Preserve semantic headings.
-- Buttons must be actual buttons.
-- Interactive elements need visible focus states.
-- Color cannot be the only signal for warnings or completion.
-- Text contrast must stay readable on all panels.
+- 保留语义化 heading。
+- 按钮必须使用真正的 button。
+- 可交互元素必须有可见的 focus 状态。
+- 不能只靠颜色表达警告或完成状态。
+- 所有面板里的文字对比度必须可读。
 
-## Code Quality Rules
+## 代码质量规则
 
-- Split large components only when the split matches a real product boundary.
-- Keep mock data separate from rendering logic once flows become dynamic.
-- Avoid premature abstraction around one-off panels.
-- Keep user-facing text in structured copy objects or i18n files.
+- 只有当组件拆分对应真实产品边界时才拆组件。
+- 一旦流程开始动态化，mock 数据要和渲染逻辑分离。
+- 不要为了单个面板过早抽象。
+- 用户可见文案要放在结构化 copy 对象或 i18n 文件里。
 
-## Acceptance Criteria
+## 验收标准
 
-- A new user can understand the next action on every screen.
-- The app never hides missing evidence.
-- Empty and error states feel intentionally designed.
-- Component names match product concepts, not visual decoration.
+- 新用户在每个屏幕都知道下一步该做什么。
+- 应用不会隐藏缺失证据。
+- 空状态和错误状态看起来是被认真设计过的。
+- 组件命名对应产品概念，而不是只描述视觉装饰。

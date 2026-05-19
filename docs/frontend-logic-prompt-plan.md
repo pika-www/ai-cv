@@ -1,62 +1,62 @@
-# Frontend Logic Prompt Plan
+# 前端逻辑 Prompt 计划
 
-Use this prompt before wiring frontend state, API calls, forms, uploads, or user flows.
+在接入前端状态、API 请求、表单、上传或用户流程之前，先使用这份提示词。
 
-## Role
+## 角色
 
-You are implementing frontend product logic for AI CV Studio. Keep the UI responsive and honest: the app must never imply that AI has verified facts the user has not provided.
+你正在实现 AI CV Studio 的前端产品逻辑。界面必须响应快、表达诚实：不能暗示 AI 已经验证了用户没有提供过的事实。
 
-## Core Flows
+## 核心流程顺序
 
-Implement flows in this order:
+按下面顺序实现前端流程：
 
-1. Profile intake
-2. Resume upload and text extraction handoff
-3. AI follow-up questions
-4. Target job description analysis
-5. Material generation
-6. Export
+1. 职业档案录入
+2. 简历上传和文本解析交接
+3. AI 追问
+4. 目标岗位 JD 分析
+5. 求职材料生成
+6. 导出
 
-## State Model
+## 状态模型
 
-Use explicit state names:
+使用明确的状态名：
 
-- `idle`
-- `editing`
-- `uploading`
-- `analyzing`
-- `needs_evidence`
-- `ready_to_generate`
-- `generating`
-- `generated`
-- `failed`
+- `idle`：未开始
+- `editing`：编辑中
+- `uploading`：上传中
+- `analyzing`：分析中
+- `needs_evidence`：需要补充证据
+- `ready_to_generate`：可以生成
+- `generating`：生成中
+- `generated`：已生成
+- `failed`：失败
 
-Avoid hidden boolean combinations such as `isLoading && hasResult && !error`.
+避免使用难以理解的布尔组合，例如 `isLoading && hasResult && !error`。
 
-## API Boundary
+## API 边界
 
-Frontend should call backend APIs through a small client layer. Do not scatter raw `fetch` calls across components.
+前端应该通过一个小的 API client 层调用后端。不要把原始 `fetch` 调用散落在各个组件里。
 
-Expected backend endpoints:
+当前预期后端接口：
 
 - `GET /health`
 - `POST /api/profile/intake`
 - `POST /api/jobs/match`
 - `POST /api/materials/generate`
 
-## Evidence Rules
+## 证据规则
 
-When displaying AI output:
+展示 AI 输出时必须做到：
 
-- Show whether a claim is supported by user profile evidence.
-- Show whether a point came from the target job description.
-- Mark unsupported claims as blocked, not as generated content.
-- Do not silently invent metrics, companies, titles, dates, tools, or outcomes.
+- 标明每条内容是否由用户职业档案支持。
+- 标明哪些内容来自目标岗位 JD。
+- 不支持的内容要标记为“无法生成”或“需要补充证据”，不要直接展示成成品。
+- 不要默默编造数据、公司、职位、日期、工具或结果。
 
-## Acceptance Criteria
+## 验收标准
 
-- API failures show clear recoverable messages.
-- Form validation happens before API calls.
-- User input is preserved if an API call fails.
-- English and Chinese copy use the same state model.
-- No generated material is shown without a traceability summary.
+- API 失败时显示清晰、可恢复的错误提示。
+- API 请求前先完成前端校验。
+- API 调用失败后，用户已经填写的内容不能丢失。
+- 中文和英文使用同一套状态模型。
+- 没有来源追踪摘要时，不展示生成材料成品。

@@ -1,36 +1,43 @@
 # AI CV Studio
 
-A bilingual web interface for building job-ready career materials from verified experience evidence.
+一个中英双语的 AI 求职材料工作台，用真实经历证据生成可投递的简历、求职信和面试材料。
 
-## What this frontend covers
+## 当前前端覆盖内容
 
-- Bilingual Chinese / English interface switch
-- Resume upload and blank profile entry points
-- Career profile readiness view
-- Target job / ATS match analysis preview
-- AI follow-up question panel for experience mining
-- Resume, cover letter, and source-trace material preview
+- 中文 / 英文界面切换
+- 上传旧简历入口
+- 从零创建职业档案入口
+- 职业档案完成度展示
+- 目标岗位 / ATS 匹配分析预览
+- AI 追问面板，用来深挖真实经历
+- 简历、求职信、来源追踪预览
 
-This is the first product interface pass. Data is currently mocked in the React app while the backend API contract is being shaped.
+这是第一版产品界面。当前数据仍然是 React 内部模拟数据，后续会接入后端 API。
 
-## Run locally
+## 本地运行
 
 ```bash
 npm install
 npm run dev
 ```
 
-## Build
+默认地址：
+
+```bash
+http://localhost:5173/
+```
+
+## 构建
 
 ```bash
 npm run build
 ```
 
-## Architecture direction
+## 架构方向
 
-The product should stay SaaS-ready while keeping a path to future open-source or local deployment:
+这个项目先按网页 SaaS 的方式开发，同时保留未来开源或本地部署的可能性：
 
-- Keep AI prompts and providers behind backend APIs.
-- Keep user-facing copy structured for i18n instead of hard-coded text across components.
-- Keep export formats portable: Markdown, PDF, DOCX, and JSON.
-- Keep generated claims traceable to profile evidence or target job descriptions.
+- AI prompt 和模型 provider 放在后端 API 后面，不直接写死在前端。
+- 用户可见文案保持结构化，方便继续完善 i18n。
+- 导出格式保持开放：Markdown、PDF、DOCX、JSON。
+- 生成内容必须能追溯到用户职业档案或目标岗位 JD。

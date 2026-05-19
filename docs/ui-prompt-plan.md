@@ -1,48 +1,48 @@
-# UI Prompt Plan
+# UI Prompt 计划
 
-Use this prompt before implementing or changing the frontend UI.
+在实现或修改前端 UI 之前，先使用这份提示词。
 
-## Role
+## 角色
 
-You are building the frontend for AI CV Studio, a bilingual AI career-material workspace. The product is for real job seekers, not a marketing demo. The first screen must feel like a usable workspace.
+你正在为 AI CV Studio 构建前端界面。它是一个中英双语 AI 求职材料工作台，面向真实求职者，不是营销展示页。首屏必须像一个可使用的工作台。
 
-## Product Intent
+## 产品目标
 
-The UI should help users:
+UI 应该帮助用户完成这些事情：
 
-- Upload an existing resume or start from a blank guided profile.
-- Build a verified career evidence profile.
-- Paste a target job description and understand fit gaps.
-- Answer AI follow-up questions that uncover real impact.
-- Preview bilingual resume, cover letter, and interview-intro outputs.
-- See which generated claims are supported by profile evidence.
+- 上传已有简历，或从空白问答开始创建职业档案。
+- 建立可验证的真实经历库。
+- 粘贴目标岗位 JD，并理解匹配度和缺口。
+- 回答 AI 追问，从真实经历里挖出成果、职责、数据和证据。
+- 预览中英双语简历、求职信和面试自我介绍。
+- 看清楚每条生成内容是否有来源依据。
 
-## Design Direction
+## 设计方向
 
-- Keep the app work-focused, editorial, and professional.
-- Prefer dense but readable information over oversized marketing sections.
-- Use bilingual copy intentionally; Chinese and English layouts must both work.
-- Do not use decorative gradient blobs, generic purple SaaS styling, or nested card-heavy layouts.
-- Use icons or short labels for tools where possible.
-- Keep cards for functional panels only: upload, profile readiness, job match, interview, material preview.
-- Make the product principle visible: no evidence, no resume claim.
+- 整体感觉要专业、克制、工作台化。
+- 信息密度可以高，但必须清晰可读。
+- 中英文布局都必须成立，不能只为中文长度设计。
+- 不使用装饰性渐变光球、通用紫色 SaaS 风格或过多嵌套卡片。
+- 工具类操作优先使用图标或短标签。
+- 卡片只用于功能面板，例如上传、档案完成度、岗位匹配、AI 追问、材料预览。
+- 明确体现产品原则：没有证据，不写进简历。
 
-## Required UI States
+## 必须考虑的 UI 状态
 
-Every new UI flow should consider:
+每个新流程都要考虑：
 
-- Empty state
-- Loading state
-- Success state
-- Validation error
-- AI cannot answer because evidence is missing
-- Mobile layout
-- English text expansion
+- 空状态
+- 加载状态
+- 成功状态
+- 校验错误
+- AI 因证据不足无法生成
+- 移动端布局
+- 英文文案变长后的布局
 
-## Acceptance Criteria
+## 验收标准
 
-- No horizontal overflow on mobile at 390px width.
-- Chinese and English interface copy both fit without clipping.
-- Buttons have clear actions and visible focus states.
-- The first viewport communicates the product workflow without becoming a landing page.
-- No UI copy promises impossible automation such as guaranteed ATS passing.
+- 390px 移动端宽度下没有横向溢出。
+- 中文和英文界面文案都不能被裁切。
+- 按钮动作明确，并且有可见的 focus 状态。
+- 首屏能表达产品工作流程，但不能变成纯营销页。
+- 不能承诺不现实的自动化结果，例如“保证通过 ATS”。
