@@ -3,8 +3,25 @@ export type FlowStep = 'start' | 'profile' | 'job' | 'match' | 'questions' | 're
 export type BulletStatus = 'supported' | 'needs_confirmation' | 'needs_evidence' | 'blocked'
 export type ExportFormat = 'plain_text' | 'markdown' | 'pdf'
 export type ResumeDirection = 'ats_clarity' | 'business_impact' | 'technical_depth' | 'concise'
+export type ResumeSectionType =
+  | 'basic_info'
+  | 'summary'
+  | 'education'
+  | 'work_experience'
+  | 'project_experience'
+  | 'skills'
+  | 'certifications'
+  | 'additional'
+export type ResumeSectionStatus = 'normal' | 'needs_review' | 'empty' | 'hidden'
+export type ResumeItemType = 'field' | 'paragraph' | 'list_item' | 'experience_entry' | 'skill_group'
+export type ResumeItemSource = 'uploaded_resume' | 'pasted_resume' | 'manual_edit' | 'ai_suggestion_applied' | 'new_experience_inserted'
+export type ResumeItemStatus = 'normal' | 'needs_review' | 'empty' | 'hidden'
+export type RiskLevel = 'low' | 'medium' | 'high'
+export type SuggestionStatus = 'open' | 'applied' | 'ignored' | 'edited_by_user' | 'blocked'
+export type InsertPosition = 'end'
+export type InsertProposalStatus = 'proposed' | 'accepted' | 'edited' | 'rejected' | 'blocked'
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4000'
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:4000'
 
 export class ApiClientError extends Error {
   code: string
@@ -47,6 +64,70 @@ export type SourceDocument = {
   mimeType?: string
   textHash: string
   createdAt: string
+}
+
+export type ResumeItem = {
+  itemId: string
+  sectionId: string
+  itemType: ResumeItemType
+  text: string
+  fields: Record<string, string>
+  order: number
+  source: ResumeItemSource
+  status: ResumeItemStatus
+}
+
+export type ResumeSection = {
+  sectionId: string
+  documentId: string
+  sectionType: ResumeSectionType
+  title: string
+  items: ResumeItem[]
+  order: number
+  status: ResumeSectionStatus
+}
+
+export type DraftDocument = {
+  documentId: string
+  sessionId: string
+  sourceResumeId?: string
+  language: Locale
+  templateId: string
+  sections: ResumeSection[]
+  revision: number
+  hasUnconfirmedChanges: boolean
+  updatedAt: string
+}
+
+export type Suggestion = {
+  suggestionId: string
+  sessionId: string
+  documentId: string
+  targetSectionId?: string
+  targetItemId?: string
+  targetText?: string
+  issue: string
+  recommendation: string
+  exampleRewrite?: string
+  riskLevel: RiskLevel
+  needsUserConfirmation: boolean
+  status: SuggestionStatus
+  createdAt: string
+}
+
+export type InsertProposal = {
+  proposalId: string
+  newExperienceId: string
+  operationId: string
+  targetSectionId: string
+  targetSectionType: ResumeSectionType
+  insertPosition: InsertPosition
+  insertedText: string
+  updatedDraftDocument: DraftDocument
+  placementReason: string
+  needsUserConfirmation: boolean
+  riskNotes: string[]
+  status: InsertProposalStatus
 }
 
 export type EvidenceItem = {
@@ -213,6 +294,9 @@ export type ExportRecord = {
 export type ParseResumeResponse = {
   session: SessionSummary
   sourceDocument: SourceDocument
+  draftDocument: DraftDocument
+  sections: ResumeSection[]
+  warnings: string[]
   profile: Profile
   evidenceItems: EvidenceItem[]
   nextQuestions: FollowUpQuestion[]
@@ -251,6 +335,19 @@ export type JobMatchResponse = {
 
 export type MaterialSetResponse = {
   materialSet: MaterialSet
+}
+
+export type AnalyzeResumeResponse = {
+  sessionId: string
+  documentId: string
+  suggestions: Suggestion[]
+  promptVersion: string
+  modelProvider: string
+  modelName: string
+}
+
+export type InsertExperienceResponse = {
+  proposal: InsertProposal
 }
 
 export type ExportResponse = {
@@ -302,6 +399,24 @@ export const api = {
     resumeText: string
   }) =>
     request<ParseResumeResponse>('/api/resumes/parse', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  analyzeResume: (body: {
+    sessionId: string
+    draftDocument: DraftDocument
+    analysisGoal?: string
+  }) =>
+    request<AnalyzeResumeResponse>('/api/resumes/analyze', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  insertExperience: (body: {
+    sessionId: string
+    draftDocument: DraftDocument
+    newExperience: string
+  }) =>
+    request<InsertExperienceResponse>('/api/resumes/insert-experience', {
       method: 'POST',
       body: JSON.stringify(body),
     }),
@@ -367,6 +482,15 @@ export const api = {
     materialSetId: string
     format: ExportFormat
     confirmedBulletIds?: string[]
+  }) =>
+    request<ExportResponse>('/api/exports', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  exportResume: (body: {
+    sessionId: string
+    draftDocument: DraftDocument
+    format: ExportFormat
   }) =>
     request<ExportResponse>('/api/exports', {
       method: 'POST',

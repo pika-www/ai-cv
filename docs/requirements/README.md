@@ -5,4 +5,5 @@
 当前文档：
 
 - [V1 产品范围](./product-v1-scope.md)
-- [V1 分步骤流程](./product-v1-step-flow.md)
+- [V1 编辑工作流](./product-v1-workflow.md)
+- [V1 编辑模型](./product-v1-edit-model.md)

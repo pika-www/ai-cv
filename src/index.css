@@ -2,8 +2,8 @@
   --sans: Avenir Next, Avenir, Helvetica Neue, Helvetica, sans-serif;
   --mono: SFMono-Regular, Consolas, Liberation Mono, Menlo, monospace;
   font-family: var(--sans);
-  color: #1b2726;
-  background: #f4f0e8;
+  color: #e5e5e5;
+  background: #0a0a0a;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -15,12 +15,25 @@
 }
 
 html {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
   scroll-behavior: smooth;
 }
 
 body {
+  width: 100%;
+  max-width: 100%;
   min-width: 320px;
   margin: 0;
+  overflow-x: hidden;
+  background: #0a0a0a;
+}
+
+#root {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
 }
 
 button,

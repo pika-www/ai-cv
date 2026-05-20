@@ -1,23 +1,14 @@
 # AI CV Studio 前端文档索引
 
-前端文档按用途分为三类：需求文档、计划文档、验收文档。
+前端文档按用途分为两类：需求文档和验收文档。
 
 ## 需求文档
 
 需求文档回答“我们要做什么，为什么做，V1 边界在哪里”。
 
 - [V1 产品范围](./requirements/product-v1-scope.md)
-- [V1 分步骤流程](./requirements/product-v1-step-flow.md)
-
-## 计划文档
-
-计划文档回答“开发时应该怎么做，按什么原则执行”。
-
-- [UI Prompt 计划](./plans/ui-prompt-plan.md)
-- [前端逻辑 Prompt 计划](./plans/frontend-logic-prompt-plan.md)
-- [优化 Prompt 计划](./plans/optimization-prompt-plan.md)
-- [性能 Prompt 计划](./plans/performance-prompt-plan.md)
-- [仓库规则](./plans/repository-rules.md)
+- [V1 编辑工作流](./requirements/product-v1-workflow.md)
+- [V1 编辑模型](./requirements/product-v1-edit-model.md)
 
 ## 验收文档
 
@@ -27,4 +18,4 @@
 
 ## 使用顺序
 
-开发新功能前，先读需求文档确认范围；实现时参考计划文档；提交前按验收文档和仓库规则检查。
+开发新功能前，先读需求文档确认范围；提交前按验收文档检查。当前 V1 的终点不是追踪文本，而是可预览、可反复修改、可导出的简历成品。
