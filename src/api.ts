@@ -22,6 +22,8 @@ export type InsertPosition = 'end'
 export type InsertProposalStatus = 'proposed' | 'accepted' | 'edited' | 'rejected' | 'blocked'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:4000'
+const ACCESS_TOKEN_STORAGE_KEY = 'ai-cv-access-token'
+let runtimeAccessToken = getInitialAccessToken()
 
 export class ApiClientError extends Error {
   code: string
@@ -36,6 +38,29 @@ export class ApiClientError extends Error {
     this.details = details
     this.recoverable = recoverable
   }
+}
+
+export function setAccessToken(token: string) {
+  const normalized = token.trim()
+  runtimeAccessToken = normalized || undefined
+  if (normalized) {
+    window.localStorage.setItem(ACCESS_TOKEN_STORAGE_KEY, normalized)
+  } else {
+    window.localStorage.removeItem(ACCESS_TOKEN_STORAGE_KEY)
+  }
+}
+
+export function hasAccessToken() {
+  return Boolean(runtimeAccessToken)
+}
+
+function loadStoredAccessToken() {
+  if (typeof window === 'undefined') return undefined
+  return window.localStorage.getItem(ACCESS_TOKEN_STORAGE_KEY)?.trim() || undefined
+}
+
+function getInitialAccessToken() {
+  return import.meta.env.VITE_APP_ACCESS_TOKEN?.trim() || loadStoredAccessToken()
 }
 
 export type HealthResponse = {
@@ -359,12 +384,15 @@ export type ExportResponse = {
 }
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const headers = new Headers(options.headers)
+  headers.set('content-type', 'application/json')
+  if (runtimeAccessToken && path !== '/health') {
+    headers.set('authorization', `Bearer ${runtimeAccessToken}`)
+  }
+
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...options,
-    headers: {
-      'content-type': 'application/json',
-      ...options.headers,
-    },
+    headers,
   })
 
   const text = await response.text()

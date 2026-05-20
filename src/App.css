@@ -262,6 +262,30 @@ input:focus-visible {
   color: #d4d4d4;
 }
 
+.access-notice {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 420px);
+  gap: var(--space-gap);
+  align-items: end;
+  border-color: rgba(34, 211, 238, 0.22);
+  background: rgba(34, 211, 238, 0.065);
+}
+
+.access-notice p {
+  color: #d4d4d4;
+}
+
+.access-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-tight);
+}
+
+.access-form input {
+  min-height: 34px;
+  padding: 0 10px;
+}
+
 .workspace {
   display: grid;
   grid-template-columns: minmax(680px, 1fr) minmax(360px, 420px);
@@ -910,6 +934,11 @@ blockquote {
 
   .notice.compact p {
     margin-top: 6px;
+  }
+
+  .access-notice,
+  .access-form {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .topbar-center {

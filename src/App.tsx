@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ApiClientError,
   api,
+  setAccessToken,
   type DraftDocument,
   type ExportFormat,
   type ExportResponse,
@@ -94,6 +95,8 @@ function App() {
   const [health, setHealth] = useState<HealthResponse | null>(null)
   const [status, setStatus] = useState<WorkflowStatus>('idle')
   const [error, setError] = useState<AppError | null>(null)
+  const [accessTokenInput, setAccessTokenInput] = useState('')
+  const [needsAccessToken, setNeedsAccessToken] = useState(false)
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [resumeText, setResumeText] = useState('')
   const [draftDocument, setDraftDocument] = useState<DraftDocument | null>(null)
@@ -120,6 +123,12 @@ function App() {
   const activeSuggestions = suggestions.filter((suggestion) => suggestion.status === 'open')
   const appliedSuggestions = suggestions.filter((suggestion) => suggestion.status === 'applied')
   const canUseBackend = health?.ok === true
+
+  function saveAccessToken() {
+    setAccessToken(accessTokenInput)
+    setNeedsAccessToken(!accessTokenInput.trim())
+    setError(null)
+  }
 
   function replaceDraftDocument(nextDraft: DraftDocument, keepHistory = true) {
     setDraftDocument((current) => {
@@ -162,6 +171,7 @@ function App() {
       setStatus('editing')
       return response.draftDocument
     } catch (caught) {
+      if (isUnauthorizedError(caught)) setNeedsAccessToken(true)
       setStatus('failed')
       setError(normalizeError(caught, '简历解析失败'))
       return null
@@ -183,6 +193,7 @@ function App() {
       setSuggestions(response.suggestions)
       setStatus('editing')
     } catch (caught) {
+      if (isUnauthorizedError(caught)) setNeedsAccessToken(true)
       setStatus('failed')
       setError(normalizeError(caught, 'AI 分析失败'))
     }
@@ -214,6 +225,7 @@ function App() {
       setInsertProposal(response.proposal)
       setStatus('editing')
     } catch (caught) {
+      if (isUnauthorizedError(caught)) setNeedsAccessToken(true)
       setStatus('failed')
       setError(normalizeError(caught, '新增经历插入失败'))
     }
@@ -430,6 +442,7 @@ function App() {
       setBrowserPdfExport(null)
       setStatus('exported')
     } catch (caught) {
+      if (isUnauthorizedError(caught)) setNeedsAccessToken(true)
       setStatus('failed')
       setError(normalizeError(caught, '导出失败'))
     }
@@ -556,6 +569,31 @@ function App() {
         <section className="notice compact">
           <strong>后端未连接</strong>
           <p>当前可以查看和编辑界面；解析、AI 建议、插入经历和导出需要启动后端服务。</p>
+        </section>
+      )}
+
+      {needsAccessToken && (
+        <section className="notice access-notice">
+          <div>
+            <strong>需要访问口令</strong>
+            <p>后端已开启访问控制。输入朋友试用口令后，解析、分析、插入和导出接口会自动携带授权信息。</p>
+          </div>
+          <div className="access-form">
+            <input
+              aria-label="访问口令"
+              autoComplete="off"
+              placeholder="输入访问口令"
+              type="password"
+              value={accessTokenInput}
+              onChange={(event) => setAccessTokenInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') saveAccessToken()
+              }}
+            />
+            <button className="button primary" disabled={!accessTokenInput.trim()} onClick={saveAccessToken} type="button">
+              保存口令
+            </button>
+          </div>
         </section>
       )}
 
@@ -1007,6 +1045,12 @@ function itemTypeForSection(sectionType: ResumeSection['sectionType']): ResumeIt
 
 function normalizeError(caught: unknown, fallbackTitle: string): AppError {
   if (caught instanceof ApiClientError) {
+    if (caught.status === 401) {
+      return {
+        title: '访问口令无效或未配置',
+        details: '请确认朋友试用口令是否正确。保存口令后可以直接重试，当前编辑内容已保留。',
+      }
+    }
     if (caught.status >= 500) {
       return {
         title: fallbackTitle,
@@ -1026,6 +1070,10 @@ function normalizeError(caught: unknown, fallbackTitle: string): AppError {
     return { title: fallbackTitle, details: '操作暂时失败，请稍后重试；你的编辑内容已保留。' }
   }
   return { title: fallbackTitle, details: '请稍后重试。' }
+}
+
+function isUnauthorizedError(caught: unknown) {
+  return caught instanceof ApiClientError && caught.status === 401
 }
 
 function supportedBackendFileName(name: string | null) {
