@@ -32,6 +32,12 @@ type AppError = {
   details: string
 }
 
+type BrowserPdfExport = {
+  fileName: string
+  contentType: string
+  createdAt: string
+}
+
 const minimumResumeChars = 40
 const minimumExperienceChars = 40
 
@@ -96,6 +102,7 @@ function App() {
   const [newExperience, setNewExperience] = useState('')
   const [insertProposal, setInsertProposal] = useState<InsertProposal | null>(null)
   const [exportState, setExportState] = useState<ExportResponse | null>(null)
+  const [browserPdfExport, setBrowserPdfExport] = useState<BrowserPdfExport | null>(null)
   const [fileName, setFileName] = useState<string | null>(null)
   const [draftHistory, setDraftHistory] = useState<DraftDocument[]>([])
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -122,6 +129,7 @@ function App() {
       return nextDraft
     })
     setExportState(null)
+    setBrowserPdfExport(null)
   }
 
   async function parseDraftFromText(): Promise<DraftDocument | null> {
@@ -239,6 +247,7 @@ function App() {
       if (!previousDraft) return history
       setDraftDocument(previousDraft)
       setExportState(null)
+      setBrowserPdfExport(null)
       setInsertProposal(null)
       setSuggestions((current) => current.map((suggestion) => (
         suggestion.status === 'applied' ? { ...suggestion, status: 'open' } : suggestion
@@ -271,6 +280,7 @@ function App() {
       }
     })
     setExportState(null)
+    setBrowserPdfExport(null)
   }
 
   function addItem(sectionId: string) {
@@ -377,6 +387,7 @@ function App() {
       }
     })
     setExportState(null)
+    setBrowserPdfExport(null)
   }
 
   async function exportResume(format: ExportFormat) {
@@ -396,6 +407,19 @@ function App() {
 
     setError(null)
     setStatus('exporting')
+    if (format === 'pdf') {
+      const printExport = {
+        fileName: draftPdfFileName(draftDocument),
+        contentType: 'application/pdf; rendered-from-preview',
+        createdAt: new Date().toISOString(),
+      }
+      setExportState(null)
+      setBrowserPdfExport(printExport)
+      setStatus('exported')
+      window.setTimeout(() => printPreviewAsPdf(printExport.fileName), 80)
+      return
+    }
+
     try {
       const response = await api.exportResume({
         sessionId: draftDocument.sessionId,
@@ -403,8 +427,8 @@ function App() {
         format,
       })
       setExportState(response)
+      setBrowserPdfExport(null)
       setStatus('exported')
-      if (format === 'pdf') downloadExport(response)
     } catch (caught) {
       setStatus('failed')
       setError(normalizeError(caught, '导出失败'))
@@ -484,6 +508,7 @@ function App() {
     setSuggestions([])
     setInsertProposal(null)
     setExportState(null)
+    setBrowserPdfExport(null)
   }
 
   return (
@@ -522,7 +547,7 @@ function App() {
             {draftDocument ? '分析建议' : '解析并分析'}
           </button>
           <button className="button secondary" disabled={!draftDocument} onClick={() => void exportResume('pdf')} type="button">
-            导出 PDF
+            保存 PDF
           </button>
         </div>
       </header>
@@ -543,7 +568,7 @@ function App() {
 
       <section className="workspace">
         <section className="main-pane">
-          <WorkflowStrip draftDocument={draftDocument} suggestions={suggestions} exportState={exportState} />
+          <WorkflowStrip draftDocument={draftDocument} suggestions={suggestions} isExported={Boolean(exportState || browserPdfExport)} />
 
           <div className="resume-workspace">
             <section className="panel editor-panel">
@@ -576,7 +601,7 @@ function App() {
               <PanelHeader
                 eyebrow="PDF preview"
                 title="成品预览"
-                meta={draftDocument ? `${draftStats.sections} sections` : 'Empty'}
+                meta={draftDocument ? 'Print source' : 'Empty'}
               />
               <ResumePreview draftDocument={draftDocument} />
             </section>
@@ -658,9 +683,21 @@ function App() {
                 纯文本
               </button>
               <button className="button primary" disabled={!draftDocument} onClick={() => void exportResume('pdf')} type="button">
-                PDF
+                保存 PDF
               </button>
             </div>
+            {browserPdfExport && (
+              <div className="export-result">
+                <strong>{browserPdfExport.fileName}</strong>
+                <span>{browserPdfExport.contentType}</span>
+                <p>PDF 使用当前成品预览模板。请在系统打印窗口选择“保存为 PDF”。</p>
+                <div className="button-row">
+                  <button className="button secondary" onClick={() => printPreviewAsPdf(browserPdfExport.fileName)} type="button">
+                    再次打开保存窗口
+                  </button>
+                </div>
+              </div>
+            )}
             {exportState && (
               <div className="export-result">
                 <strong>{exportState.fileName}</strong>
@@ -849,11 +886,11 @@ function SuggestionList({
 
 function WorkflowStrip({
   draftDocument,
-  exportState,
+  isExported,
   suggestions,
 }: {
   draftDocument: DraftDocument | null
-  exportState: ExportResponse | null
+  isExported: boolean
   suggestions: Suggestion[]
 }) {
   const steps = [
@@ -863,7 +900,7 @@ function WorkflowStrip({
     { label: '新增', active: Boolean(draftDocument?.sections.some((section) => (
       section.items.some((item) => item.source === 'new_experience_inserted')
     ))) },
-    { label: '导出', active: Boolean(exportState) },
+    { label: '导出', active: isExported },
   ]
 
   return (
@@ -1010,6 +1047,20 @@ function supportedBackendMimeType(name: string | null) {
 
 function fileExtension(name: string) {
   return name.split('.').pop()?.toLowerCase() ?? ''
+}
+
+function draftPdfFileName(draftDocument: DraftDocument) {
+  const date = new Date().toISOString().slice(0, 10).replaceAll('-', '')
+  return `${date}-${draftDocument.documentId}-r${draftDocument.revision}.pdf`
+}
+
+function printPreviewAsPdf(fileName: string) {
+  const previousTitle = document.title
+  document.title = fileName.replace(/\.pdf$/i, '')
+  window.print()
+  window.setTimeout(() => {
+    document.title = previousTitle
+  }, 500)
 }
 
 function downloadBlob(blob: Blob, fileName: string) {

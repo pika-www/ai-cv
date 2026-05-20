@@ -863,6 +863,13 @@ blockquote {
   font-size: 13px;
 }
 
+.export-result p {
+  margin: 8px 0 0;
+  color: #bdbdbd;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 @media (max-width: 1180px) {
   .topbar {
     grid-template-columns: 1fr;
@@ -1019,5 +1026,72 @@ blockquote {
 
   .source-textarea {
     min-height: 250px;
+  }
+}
+
+@media print {
+  @page {
+    size: A4;
+    margin: 0;
+  }
+
+  html,
+  body,
+  #root,
+  .app-shell {
+    width: 210mm;
+    min-height: 297mm;
+    margin: 0;
+    background: #ffffff;
+  }
+
+  body * {
+    visibility: hidden;
+  }
+
+  .preview-panel,
+  .preview-panel *,
+  .resume-paper,
+  .resume-paper * {
+    visibility: visible;
+  }
+
+  .topbar,
+  .notice,
+  .workflow-strip,
+  .editor-panel,
+  .add-panel,
+  .assistant-panel,
+  .preview-panel .panel-header {
+    display: none;
+  }
+
+  .workspace,
+  .main-pane,
+  .resume-workspace,
+  .preview-panel {
+    display: block;
+    width: 210mm;
+    max-width: 210mm;
+    margin: 0;
+    padding: 0;
+    overflow: visible;
+    background: #ffffff;
+    border: 0;
+    box-shadow: none;
+  }
+
+  .preview-panel {
+    position: static;
+    min-height: 0;
+  }
+
+  .resume-paper {
+    width: 210mm;
+    min-height: 297mm;
+    margin: 0;
+    padding: 18mm 20mm;
+    border-radius: 0;
+    box-shadow: none;
   }
 }
