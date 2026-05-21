@@ -9,6 +9,7 @@ import {
   type ExportResponse,
   type HealthResponse,
   type InsertProposal,
+  type NewWorkExperience,
   type ResumeItem,
   type ResumeSection,
   type ResumeSectionStatus,
@@ -41,8 +42,23 @@ type BrowserPdfExport = {
   createdAt: string
 }
 
+type ResumeProfile = {
+  fullName: string
+  phone: string
+  email: string
+  city: string
+  targetRole: string
+  photoDataUrl: string
+}
+
+type ExperienceFieldKey = keyof NewWorkExperience
+
+type PreviewPage = {
+  pageNumber: number
+  sections: ResumeSection[]
+}
+
 const minimumResumeChars = 40
-const minimumExperienceChars = 40
 
 const sampleResume = [
   '张明',
@@ -93,6 +109,43 @@ const riskLabel: Record<RiskLevel, string> = {
   high: '高风险',
 }
 
+const emptyResumeProfile: ResumeProfile = {
+  fullName: '',
+  phone: '',
+  email: '',
+  city: '',
+  targetRole: '',
+  photoDataUrl: '',
+}
+
+const emptyWorkExperience: NewWorkExperience = {
+  companyName: '',
+  positionTitle: '',
+  employmentStart: '',
+  employmentEnd: '',
+  isCurrentRole: false,
+  projectName: '',
+  projectDescription: '',
+  responsibilities: '',
+  actions: '',
+  outcomes: '',
+  rawText: '',
+}
+
+const experienceFieldLabel: Record<ExperienceFieldKey, string> = {
+  companyName: '公司名',
+  positionTitle: '职位',
+  employmentStart: '入职开始时间',
+  employmentEnd: '离职结束时间',
+  isCurrentRole: '至今',
+  projectName: '主要项目名称',
+  projectDescription: '项目介绍',
+  responsibilities: '主要职责',
+  actions: '关键动作',
+  outcomes: '结果或产出',
+  rawText: '自由描述',
+}
+
 function App() {
   const [health, setHealth] = useState<HealthResponse | null>(null)
   const [status, setStatus] = useState<WorkflowStatus>('idle')
@@ -104,7 +157,8 @@ function App() {
   const [draftDocument, setDraftDocument] = useState<DraftDocument | null>(null)
   const [warnings, setWarnings] = useState<string[]>([])
   const [suggestions, setSuggestions] = useState<Suggestion[]>([])
-  const [newExperience, setNewExperience] = useState('')
+  const [resumeProfile, setResumeProfile] = useState<ResumeProfile>(emptyResumeProfile)
+  const [newWorkExperience, setNewWorkExperience] = useState<NewWorkExperience>(emptyWorkExperience)
   const [insertProposal, setInsertProposal] = useState<InsertProposal | null>(null)
   const [exportState, setExportState] = useState<ExportResponse | null>(null)
   const [browserPdfExport, setBrowserPdfExport] = useState<BrowserPdfExport | null>(null)
@@ -130,6 +184,7 @@ function App() {
   const activeSuggestions = suggestions.filter((suggestion) => suggestion.status === 'open')
   const appliedSuggestions = suggestions.filter((suggestion) => suggestion.status === 'applied')
   const canUseBackend = health?.ok === true
+  const aiAnalysisUnavailable = canUseBackend && isAiAnalysisUnavailable(health)
 
   function saveAccessToken() {
     setAccessToken(accessTokenInput)
@@ -169,6 +224,7 @@ function App() {
       setSessionId(response.session.sessionId)
       setDraftHistory([])
       replaceDraftDocument(response.draftDocument, false)
+      setResumeProfile((current) => mergeProfileFromDraft(current, response.draftDocument, fileName))
       setWarnings(localizeBackendTexts(response.warnings))
       setSuggestions([])
       setInsertProposal(null)
@@ -185,6 +241,11 @@ function App() {
   async function analyzeResume() {
     const activeDraft = draftDocument ?? await parseDraftFromText()
     if (!activeDraft) return
+    if (isAiAnalysisUnavailable(health)) {
+      setStatus('failed')
+      setError(aiProviderNotConfiguredError('AI 分析暂时不可用'))
+      return
+    }
 
     setError(null)
     setStatus('analyzing')
@@ -208,15 +269,21 @@ function App() {
       setError({ title: '还没有简历草稿', details: '请先粘贴或上传简历，解析成可编辑草稿。' })
       return
     }
+    if (isAiAnalysisUnavailable(health)) {
+      setStatus('failed')
+      setError(aiProviderNotConfiguredError('新增经历暂时不能自动插入'))
+      return
+    }
 
-    const text = newExperience.trim()
-    if (text.length < minimumExperienceChars) {
+    const validation = validateWorkExperience(newWorkExperience)
+    if (!validation.valid) {
       setError({
-        title: '新增经历太短',
-        details: `请写清楚你的角色、动作和结果，至少 ${minimumExperienceChars} 个字符。`,
+        title: '新增经历缺少关键信息',
+        details: `请先补充：${validation.missingLabels.join('、')}。AI 只能整理你提供过的信息，不能替你编造公司、职位、时间或结果。`,
       })
       return
     }
+    const text = formatWorkExperienceForApi(newWorkExperience)
 
     setError(null)
     setStatus('inserting')
@@ -225,6 +292,7 @@ function App() {
         sessionId: draftDocument.sessionId,
         draftDocument,
         newExperience: text,
+        newWorkExperience,
       })
       setInsertProposal(response.proposal)
       setStatus('editing')
@@ -238,7 +306,7 @@ function App() {
   function acceptInsertProposal() {
     if (!insertProposal) return
     replaceDraftDocument(insertProposal.updatedDraftDocument)
-    setNewExperience('')
+    setNewWorkExperience(emptyWorkExperience)
     setInsertProposal(null)
   }
 
@@ -360,6 +428,15 @@ function App() {
       })
       return
     }
+    if (!canApplySuggestion(suggestion)) {
+      setError({
+        title: '这条建议需要先补充信息',
+        details: suggestion.blockedReason
+          ? localizeBackendText(suggestion.blockedReason)
+          : 'AI 标记这条建议需要用户补充或确认，不能直接写入可导出的简历。',
+      })
+      return
+    }
     replaceDraftDocument({
       ...draftDocument,
       revision: draftDocument.revision + 1,
@@ -411,6 +488,41 @@ function App() {
     })
     setExportState(null)
     setBrowserPdfExport(null)
+  }
+
+  function updateResumeProfile(field: keyof ResumeProfile, value: string) {
+    setResumeProfile((current) => ({ ...current, [field]: value }))
+    setExportState(null)
+    setBrowserPdfExport(null)
+  }
+
+  async function handleProfilePhoto(file: File) {
+    if (!file.type.startsWith('image/')) {
+      setError({ title: '照片格式不支持', details: '请上传 JPG、PNG 或 WebP 图片。照片只用于当前浏览器预览和打印，不会作为 AI key 或后端凭据处理。' })
+      return
+    }
+    if (file.size > 4 * 1024 * 1024) {
+      setError({ title: '照片太大', details: '请上传小于 4MB 的头像或证件照，避免打印 PDF 时变慢。' })
+      return
+    }
+    const photoDataUrl = await readFileAsDataUrl(file)
+    setResumeProfile((current) => ({ ...current, photoDataUrl }))
+    setExportState(null)
+    setBrowserPdfExport(null)
+  }
+
+  function removeProfilePhoto() {
+    setResumeProfile((current) => ({ ...current, photoDataUrl: '' }))
+    setExportState(null)
+    setBrowserPdfExport(null)
+  }
+
+  function updateWorkExperience(field: ExperienceFieldKey, value: string | boolean) {
+    setNewWorkExperience((current) => ({
+      ...current,
+      [field]: value,
+      ...(field === 'isCurrentRole' && value === true ? { employmentEnd: '' } : {}),
+    }))
   }
 
   async function exportResume(format: ExportFormat) {
@@ -525,6 +637,7 @@ function App() {
     setInsertProposal(null)
     setExportState(null)
     setBrowserPdfExport(null)
+    setResumeProfile(emptyResumeProfile)
   }
 
   return (
@@ -575,6 +688,13 @@ function App() {
         </section>
       )}
 
+      {aiAnalysisUnavailable && (
+        <section className="notice compact ai-provider-notice">
+          <strong>真实 AI 分析不可用</strong>
+          <p>{health?.aiAnalysisRequired ? '后端验收模式要求真实 AI provider，但当前不可用。' : '后端当前没有可用的 AI 分析能力。'}前端不会用本地规则冒充 AI 建议；当前编辑内容和预览仍可继续保留。</p>
+        </section>
+      )}
+
       {needsAccessToken && (
         <section className="notice access-notice">
           <div>
@@ -619,14 +739,22 @@ function App() {
                 meta={draftDocument ? `Revision ${draftDocument.revision}` : `${resumeText.length} chars`}
               />
               {draftDocument ? (
-                <DraftEditor
-                  draftDocument={draftDocument}
-                  onAddItem={addItem}
-                  onRemoveItem={removeItem}
-                  onUpdateItem={updateItemText}
-                  onUndo={undoLastDraftChange}
-                  canUndo={draftHistory.length > 0}
-                />
+                <>
+                  <ProfileEditor
+                    profile={resumeProfile}
+                    onPhotoChange={(file) => void handleProfilePhoto(file)}
+                    onPhotoRemove={removeProfilePhoto}
+                    onUpdate={updateResumeProfile}
+                  />
+                  <DraftEditor
+                    draftDocument={draftDocument}
+                    onAddItem={addItem}
+                    onRemoveItem={removeItem}
+                    onUpdateItem={updateItemText}
+                    onUndo={undoLastDraftChange}
+                    canUndo={draftHistory.length > 0}
+                  />
+                </>
               ) : (
                 <ImportPanel
                   fileName={fileName}
@@ -644,25 +772,18 @@ function App() {
                 title="成品预览"
                 meta={draftDocument ? 'Print source' : 'Empty'}
               />
-              <ResumePreview draftDocument={draftDocument} />
+              <ResumePreview draftDocument={draftDocument} profile={resumeProfile} />
             </section>
           </div>
 
           <section className="panel add-panel">
-              <PanelHeader eyebrow="Add experience" title="新增经历" meta="AI placement" />
-            <div className="add-experience-grid">
-              <textarea
-                placeholder="写一段真实新增经历，例如：我负责 Redis 缓存优化，把账单接口平均响应时间从 800ms 降到 300ms，并补充了监控告警。"
-                value={newExperience}
-                onChange={(event) => setNewExperience(event.target.value)}
-              />
-              <div className="add-side">
-                <p>AI 会判断这段内容应该放进工作经历、项目经历或技能区。插入结果需要你确认后才会进入导出。</p>
-                <button className="button primary" disabled={status === 'inserting'} onClick={insertExperience} type="button">
-                  {status === 'inserting' ? '正在判断位置' : '放入简历'}
-                </button>
-              </div>
-            </div>
+            <PanelHeader eyebrow="Add experience" title="新增工作经历" meta="Structured input" />
+            <WorkExperienceForm
+              disabled={status === 'inserting'}
+              value={newWorkExperience}
+              onSubmit={insertExperience}
+              onUpdate={updateWorkExperience}
+            />
           </section>
         </section>
 
@@ -690,6 +811,12 @@ function App() {
                 <ul className="risk-list">
                   {insertProposal.riskNotes.map((note) => <li key={note}>{localizeBackendText(note)}</li>)}
                 </ul>
+              )}
+              {insertProposal.missingFields && insertProposal.missingFields.length > 0 && (
+                <div className="missing-field-box">
+                  <strong>后端标记缺少字段</strong>
+                  <p>{insertProposal.missingFields.map((field) => workExperienceFieldName(field)).join('、')}</p>
+                </div>
               )}
               <div className="button-row">
                 <button className="button primary" onClick={acceptInsertProposal} type="button">接受插入</button>
@@ -795,6 +922,71 @@ function ImportPanel({
   )
 }
 
+function ProfileEditor({
+  onPhotoChange,
+  onPhotoRemove,
+  onUpdate,
+  profile,
+}: {
+  onPhotoChange: (file: File) => void
+  onPhotoRemove: () => void
+  onUpdate: (field: keyof ResumeProfile, value: string) => void
+  profile: ResumeProfile
+}) {
+  const photoInputId = 'profile-photo-input'
+
+  return (
+    <section className="profile-editor" aria-label="照片与基本信息">
+      <div className="profile-photo-control">
+        <div className={profile.photoDataUrl ? 'photo-preview has-photo' : 'photo-preview'}>
+          {profile.photoDataUrl ? <img alt="简历照片预览" src={profile.photoDataUrl} /> : <span>照片</span>}
+        </div>
+        <div className="photo-actions">
+          <label className="button secondary small" htmlFor={photoInputId}>上传照片</label>
+          <input
+            accept="image/*"
+            hidden
+            id={photoInputId}
+            type="file"
+            onChange={(event) => {
+              const file = event.target.files?.[0]
+              if (file) onPhotoChange(file)
+              event.currentTarget.value = ''
+            }}
+          />
+          {profile.photoDataUrl && (
+            <button className="text-button" onClick={onPhotoRemove} type="button">
+              移除照片
+            </button>
+          )}
+        </div>
+      </div>
+      <div className="profile-fields">
+        <label>
+          <span>姓名</span>
+          <input value={profile.fullName} onChange={(event) => onUpdate('fullName', event.target.value)} placeholder="例如：张明" />
+        </label>
+        <label>
+          <span>电话</span>
+          <input value={profile.phone} onChange={(event) => onUpdate('phone', event.target.value)} placeholder="例如：138 0000 0000" />
+        </label>
+        <label>
+          <span>邮箱</span>
+          <input value={profile.email} onChange={(event) => onUpdate('email', event.target.value)} placeholder="name@example.com" />
+        </label>
+        <label>
+          <span>城市</span>
+          <input value={profile.city} onChange={(event) => onUpdate('city', event.target.value)} placeholder="例如：上海" />
+        </label>
+        <label className="profile-field-wide">
+          <span>求职意向</span>
+          <input value={profile.targetRole} onChange={(event) => onUpdate('targetRole', event.target.value)} placeholder="例如：Rust 后端工程师" />
+        </label>
+      </div>
+    </section>
+  )
+}
+
 function DraftEditor({
   canUndo,
   draftDocument,
@@ -846,7 +1038,172 @@ function DraftEditor({
   )
 }
 
-function ResumePreview({ draftDocument }: { draftDocument: DraftDocument | null }) {
+function WorkExperienceForm({
+  disabled,
+  onSubmit,
+  onUpdate,
+  value,
+}: {
+  disabled: boolean
+  onSubmit: () => void
+  onUpdate: (field: ExperienceFieldKey, value: string | boolean) => void
+  value: NewWorkExperience
+}) {
+  const validation = validateWorkExperience(value)
+
+  return (
+    <div className="work-experience-form">
+      <div className="structured-grid">
+        <FieldInput
+          field="companyName"
+          label="公司名"
+          onUpdate={onUpdate}
+          placeholder="例如：某某科技有限公司"
+          required
+          value={value.companyName}
+        />
+        <FieldInput
+          field="positionTitle"
+          label="职位"
+          onUpdate={onUpdate}
+          placeholder="例如：后端工程师"
+          required
+          value={value.positionTitle}
+        />
+        <FieldInput
+          field="employmentStart"
+          label="入职开始时间"
+          onUpdate={onUpdate}
+          placeholder="例如：2023.05"
+          required
+          value={value.employmentStart}
+        />
+        <label className="field-control">
+          <span>离职结束时间</span>
+          <input
+            disabled={value.isCurrentRole}
+            placeholder={value.isCurrentRole ? '至今' : '例如：2025.12'}
+            value={value.isCurrentRole ? '' : value.employmentEnd}
+            onChange={(event) => onUpdate('employmentEnd', event.target.value)}
+          />
+        </label>
+        <label className="checkbox-control">
+          <input checked={value.isCurrentRole} type="checkbox" onChange={(event) => onUpdate('isCurrentRole', event.target.checked)} />
+          <span>当前仍在职</span>
+        </label>
+        <FieldInput
+          field="projectName"
+          label="主要项目名称"
+          onUpdate={onUpdate}
+          placeholder="例如：账单系统性能优化"
+          required
+          value={value.projectName}
+        />
+      </div>
+
+      <div className="structured-textareas">
+        <FieldTextarea
+          field="projectDescription"
+          label="项目介绍"
+          onUpdate={onUpdate}
+          placeholder="这个项目解决了什么业务问题，面向哪些用户或流程。"
+          required
+          value={value.projectDescription}
+        />
+        <FieldTextarea
+          field="responsibilities"
+          label="主要职责"
+          onUpdate={onUpdate}
+          placeholder="你负责的模块、协作对象、交付范围。"
+          required
+          value={value.responsibilities}
+        />
+        <FieldTextarea
+          field="actions"
+          label="关键动作"
+          onUpdate={onUpdate}
+          placeholder="你具体做了哪些动作，例如重构缓存、优化 SQL、补充监控。"
+          required
+          value={value.actions}
+        />
+        <FieldTextarea
+          field="outcomes"
+          label="结果或产出"
+          onUpdate={onUpdate}
+          placeholder="只写真实结果，例如响应时间降低、稳定性提升、上线交付。没有数字也可以写实际产出。"
+          required
+          value={value.outcomes}
+        />
+        <FieldTextarea
+          field="rawText"
+          label="自由描述"
+          onUpdate={onUpdate}
+          placeholder="补充背景、工具栈或你希望保留的原话。可选。"
+          value={value.rawText}
+        />
+      </div>
+
+      <div className="structured-actions">
+        <p>
+          {validation.valid
+            ? '字段完整后，AI 会基于这些事实判断插入到工作经历或项目经历。插入结果仍需要你确认后才会进入导出。'
+            : `还需要补充：${validation.missingLabels.join('、')}。`}
+        </p>
+        <button className="button primary" disabled={disabled || !validation.valid} onClick={onSubmit} type="button">
+          {disabled ? '正在判断位置' : '放入简历'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function FieldInput({
+  field,
+  label,
+  onUpdate,
+  placeholder,
+  required = false,
+  value,
+}: {
+  field: ExperienceFieldKey
+  label: string
+  onUpdate: (field: ExperienceFieldKey, value: string) => void
+  placeholder: string
+  required?: boolean
+  value: string
+}) {
+  return (
+    <label className="field-control">
+      <span>{label}{required && <b>*</b>}</span>
+      <input value={value} onChange={(event) => onUpdate(field, event.target.value)} placeholder={placeholder} />
+    </label>
+  )
+}
+
+function FieldTextarea({
+  field,
+  label,
+  onUpdate,
+  placeholder,
+  required = false,
+  value,
+}: {
+  field: ExperienceFieldKey
+  label: string
+  onUpdate: (field: ExperienceFieldKey, value: string) => void
+  placeholder: string
+  required?: boolean
+  value: string
+}) {
+  return (
+    <label className="field-control">
+      <span>{label}{required && <b>*</b>}</span>
+      <textarea value={value} onChange={(event) => onUpdate(field, event.target.value)} placeholder={placeholder} />
+    </label>
+  )
+}
+
+function ResumePreview({ draftDocument, profile }: { draftDocument: DraftDocument | null; profile: ResumeProfile }) {
   if (!draftDocument) {
     return (
       <div className="preview-empty">
@@ -857,21 +1214,67 @@ function ResumePreview({ draftDocument }: { draftDocument: DraftDocument | null 
     )
   }
 
+  const pages = paginateSections(visibleSections(draftDocument).filter((section) => section.sectionType !== 'basic_info'))
+
   return (
-    <article className="resume-paper">
-      {visibleSections(draftDocument).map((section, index) => (
-        <section className={index === 0 ? 'paper-section first' : 'paper-section'} key={section.sectionId}>
-          <h2>{sectionTitle[section.sectionType] ?? section.title}</h2>
-          <div className="paper-items">
-            {section.items.map((item) => (
-              <p className={item.status === 'needs_review' ? 'needs-review' : ''} key={item.itemId}>
-                {item.text || '空条目'}
-              </p>
-            ))}
-          </div>
-        </section>
+    <div className="resume-pages" aria-label="多页简历预览">
+      {pages.map((page) => (
+        <article className="resume-paper" key={page.pageNumber}>
+          <ResumePaperHeader isFirstPage={page.pageNumber === 1} pageNumber={page.pageNumber} profile={profile} />
+          {page.sections.map((section, index) => (
+            <section className={index === 0 ? 'paper-section first' : 'paper-section'} key={section.sectionId}>
+              <h2>{sectionTitle[section.sectionType] ?? section.title}</h2>
+              <div className="paper-items">
+                {section.items.map((item) => (
+                  <p className={item.status === 'needs_review' ? 'needs-review' : ''} key={item.itemId}>
+                    {item.text || '空条目'}
+                  </p>
+                ))}
+              </div>
+            </section>
+          ))}
+          <footer className="paper-footer">Page {page.pageNumber}</footer>
+        </article>
       ))}
-    </article>
+    </div>
+  )
+}
+
+function ResumePaperHeader({
+  isFirstPage,
+  pageNumber,
+  profile,
+}: {
+  isFirstPage: boolean
+  pageNumber: number
+  profile: ResumeProfile
+}) {
+  const displayName = profile.fullName.trim() || '姓名'
+  const targetRole = profile.targetRole.trim() || '求职意向'
+  const contacts = [profile.phone, profile.email, profile.city].map((item) => item.trim()).filter(Boolean)
+
+  if (!isFirstPage) {
+    return (
+      <header className="paper-running-header">
+        <strong>{displayName}</strong>
+        <span>{targetRole} · Page {pageNumber}</span>
+      </header>
+    )
+  }
+
+  return (
+    <header className="paper-profile-header">
+      <div className="paper-profile-copy">
+        <h1>{displayName}</h1>
+        <p>{targetRole}</p>
+        <div className="paper-contact-line">
+          {contacts.length > 0 ? contacts.map((item) => <span key={item}>{item}</span>) : <span>电话 / 邮箱 / 城市</span>}
+        </div>
+      </div>
+      <div className={profile.photoDataUrl ? 'paper-photo has-photo' : 'paper-photo'}>
+        {profile.photoDataUrl ? <img alt="简历照片" src={profile.photoDataUrl} /> : <span>Photo</span>}
+      </div>
+    </header>
   )
 }
 
@@ -911,8 +1314,9 @@ function SuggestionList({
               <p>{suggestion.exampleRewrite}</p>
             </div>
           )}
+          <SuggestionGuardrails suggestion={suggestion} />
           <div className="button-row">
-            <button className="button primary small" disabled={!isSafeSuggestionRewrite(suggestion.exampleRewrite)} onClick={() => onApply(suggestion)} type="button">
+            <button className="button primary small" disabled={!isSafeSuggestionRewrite(suggestion.exampleRewrite) || !canApplySuggestion(suggestion)} onClick={() => onApply(suggestion)} type="button">
               应用
             </button>
             <button className="button secondary small" onClick={() => onIgnore(suggestion.suggestionId)} type="button">
@@ -921,6 +1325,28 @@ function SuggestionList({
           </div>
         </article>
       ))}
+    </div>
+  )
+}
+
+function SuggestionGuardrails({ suggestion }: { suggestion: Suggestion }) {
+  const questions = suggestion.questions ?? []
+  if (!suggestion.needsUserInput && !suggestion.blockedReason && questions.length === 0 && !suggestion.source) {
+    return null
+  }
+
+  return (
+    <div className={suggestion.needsUserInput || suggestion.blockedReason ? 'suggestion-guard blocked' : 'suggestion-guard'}>
+      {suggestion.source && (
+        <span>{suggestion.source === 'ai_provider' ? '来源：真实 AI provider' : '来源：本地开发兜底，不作为验收建议'}</span>
+      )}
+      {suggestion.blockedReason && <p>{localizeBackendText(suggestion.blockedReason)}</p>}
+      {suggestion.needsUserInput && <p>这条建议需要你先补充信息，暂不能一键应用。</p>}
+      {questions.length > 0 && (
+        <ul>
+          {questions.map((question) => <li key={question}>{localizeBackendText(question)}</li>)}
+        </ul>
+      )}
     </div>
   )
 }
@@ -1039,11 +1465,150 @@ function visibleSections(draftDocument: DraftDocument) {
     }))
 }
 
+function validateWorkExperience(input: NewWorkExperience) {
+  const requiredFields: ExperienceFieldKey[] = [
+    'companyName',
+    'positionTitle',
+    'employmentStart',
+    'projectName',
+    'projectDescription',
+    'responsibilities',
+    'actions',
+    'outcomes',
+  ]
+  if (!input.isCurrentRole) requiredFields.splice(3, 0, 'employmentEnd')
+
+  const missingLabels = requiredFields
+    .filter((field) => !String(input[field]).trim())
+    .map((field) => experienceFieldLabel[field])
+
+  return { valid: missingLabels.length === 0, missingLabels }
+}
+
+function formatWorkExperienceForApi(input: NewWorkExperience) {
+  const end = input.isCurrentRole ? '至今' : input.employmentEnd.trim()
+  const lines = [
+    `公司：${input.companyName.trim()}`,
+    `职位：${input.positionTitle.trim()}`,
+    `时间：${input.employmentStart.trim()} - ${end}`,
+    `主要项目：${input.projectName.trim()}`,
+    `项目介绍：${input.projectDescription.trim()}`,
+    `主要职责：${input.responsibilities.trim()}`,
+    `关键动作：${input.actions.trim()}`,
+    `结果或产出：${input.outcomes.trim()}`,
+  ]
+
+  if (input.rawText.trim()) lines.push(`补充描述：${input.rawText.trim()}`)
+  return lines.join('\n')
+}
+
+function workExperienceFieldName(field: string) {
+  return experienceFieldLabel[field as ExperienceFieldKey] ?? field
+}
+
+function paginateSections(sections: ResumeSection[]): PreviewPage[] {
+  const pages: PreviewPage[] = []
+  let currentSections: ResumeSection[] = []
+  let currentWeight = 0
+
+  sections.forEach((section) => {
+    const sectionWeight = estimateSectionWeight(section)
+    const limit = pages.length === 0 ? 1750 : 2100
+    if (currentSections.length > 0 && currentWeight + sectionWeight > limit) {
+      pages.push({ pageNumber: pages.length + 1, sections: currentSections })
+      currentSections = []
+      currentWeight = 0
+    }
+
+    if (sectionWeight > limit && section.items.length > 1) {
+      const chunks = chunkLargeSection(section, limit)
+      chunks.forEach((chunk) => {
+        if (currentSections.length > 0) {
+          pages.push({ pageNumber: pages.length + 1, sections: currentSections })
+          currentSections = []
+          currentWeight = 0
+        }
+        pages.push({ pageNumber: pages.length + 1, sections: [chunk] })
+      })
+      return
+    }
+
+    currentSections.push(section)
+    currentWeight += sectionWeight
+  })
+
+  if (currentSections.length > 0) {
+    pages.push({ pageNumber: pages.length + 1, sections: currentSections })
+  }
+
+  return pages.length > 0 ? pages : [{ pageNumber: 1, sections: [] }]
+}
+
+function estimateSectionWeight(section: ResumeSection) {
+  const textLength = section.items.reduce((sum, item) => sum + item.text.length, 0)
+  return 180 + section.items.length * 70 + textLength
+}
+
+function chunkLargeSection(section: ResumeSection, limit: number) {
+  const chunks: ResumeSection[] = []
+  let items: ResumeItem[] = []
+  let weight = 180
+
+  section.items.forEach((item) => {
+    const itemWeight = 70 + item.text.length
+    if (items.length > 0 && weight + itemWeight > limit) {
+      chunks.push({ ...section, sectionId: `${section.sectionId}_page_${chunks.length + 1}`, items })
+      items = []
+      weight = 180
+    }
+    items.push(item)
+    weight += itemWeight
+  })
+
+  if (items.length > 0) {
+    chunks.push({ ...section, sectionId: `${section.sectionId}_page_${chunks.length + 1}`, items })
+  }
+
+  return chunks
+}
+
 function itemTypeForSection(sectionType: ResumeSection['sectionType']): ResumeItem['itemType'] {
   if (sectionType === 'summary') return 'paragraph'
   if (sectionType === 'skills') return 'skill_group'
   if (sectionType === 'work_experience' || sectionType === 'project_experience') return 'experience_entry'
   return 'list_item'
+}
+
+function mergeProfileFromDraft(current: ResumeProfile, draftDocument: DraftDocument, fallbackName: string | null): ResumeProfile {
+  const text = visibleSections(draftDocument).flatMap((section) => section.items.map((item) => item.text)).join('\n')
+  const lines = text.split(/\n+/).map((line) => line.trim()).filter(Boolean)
+  const firstLine = lines.find((line) => line.length <= 18 && !line.includes('@') && !line.includes('：') && !line.includes(':'))
+  const email = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0] ?? ''
+  const phone = text.match(/(?:\+?86[-\s]?)?1[3-9]\d[\s-]?\d{4}[\s-]?\d{4}/)?.[0] ?? ''
+  const city = inferCity(text)
+  const nameFromFile = fallbackName?.replace(/\.[^.]+$/, '').replace(/[_-]/g, ' ').trim() ?? ''
+  const targetRole = inferTargetRole(lines)
+
+  return {
+    fullName: current.fullName || firstLine || nameFromFile,
+    phone: current.phone || phone,
+    email: current.email || email,
+    city: current.city || city,
+    targetRole: current.targetRole || targetRole,
+    photoDataUrl: current.photoDataUrl,
+  }
+}
+
+function inferCity(text: string) {
+  const knownCities = ['北京', '上海', '广州', '深圳', '杭州', '南京', '成都', '武汉', '西安', '苏州', '重庆', '天津']
+  return knownCities.find((city) => text.includes(city)) ?? ''
+}
+
+function inferTargetRole(lines: string[]) {
+  return lines.find((line) => (
+    /工程师|设计师|产品经理|运营|分析师|开发|前端|后端|全栈|数据|销售|市场/.test(line)
+    && line.length <= 48
+  )) ?? ''
 }
 
 function normalizeError(caught: unknown, fallbackTitle: string): AppError {
@@ -1078,6 +1643,19 @@ function normalizeError(caught: unknown, fallbackTitle: string): AppError {
   return { title: fallbackTitle, details: '请稍后重试。' }
 }
 
+function aiProviderNotConfiguredError(title: string): AppError {
+  return {
+    title,
+    details: '后端还没有配置真实 AI provider。为避免把本地规则或固定模板冒充 AI 结果，前端已停止本次操作；你的编辑内容已保留。',
+  }
+}
+
+function isAiAnalysisUnavailable(health: HealthResponse | null) {
+  if (!health) return false
+  if (health.aiAnalysisAvailable === false) return true
+  return health.aiProviderConfigured === false
+}
+
 function isSafeSuggestionRewrite(rewrite: string | null | undefined) {
   if (!rewrite?.trim()) return false
   const blockedPhrases = [
@@ -1093,6 +1671,10 @@ function isSafeSuggestionRewrite(rewrite: string | null | undefined) {
   ]
   const lower = rewrite.toLowerCase()
   return !blockedPhrases.some((phrase) => lower.includes(phrase.toLowerCase()))
+}
+
+function canApplySuggestion(suggestion: Suggestion) {
+  return !suggestion.needsUserInput && !suggestion.blockedReason
 }
 
 function isUnauthorizedError(caught: unknown) {
@@ -1169,6 +1751,15 @@ async function extractDocxText(file: File) {
   const arrayBuffer = await file.arrayBuffer()
   const result = await mammoth.extractRawText({ arrayBuffer })
   return result.value.trim()
+}
+
+function readFileAsDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.addEventListener('load', () => resolve(String(reader.result ?? '')))
+    reader.addEventListener('error', () => reject(new Error('浏览器无法读取这张照片，请换一张图片重试。')))
+    reader.readAsDataURL(file)
+  })
 }
 
 function uploadExtractionFallbackDetails(extension: string) {

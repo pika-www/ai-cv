@@ -18,6 +18,7 @@ export type ResumeItemSource = 'uploaded_resume' | 'pasted_resume' | 'manual_edi
 export type ResumeItemStatus = 'normal' | 'needs_review' | 'empty' | 'hidden'
 export type RiskLevel = 'low' | 'medium' | 'high'
 export type SuggestionStatus = 'open' | 'applied' | 'ignored' | 'edited_by_user' | 'blocked'
+export type SuggestionSource = 'ai_provider' | 'local_development_fallback'
 export type InsertPosition = 'end'
 export type InsertProposalStatus = 'proposed' | 'accepted' | 'edited' | 'rejected' | 'blocked'
 
@@ -69,6 +70,8 @@ export type HealthResponse = {
   version: string
   maxRequestBytes: number
   aiProviderConfigured: boolean
+  aiAnalysisRequired?: boolean
+  aiAnalysisAvailable?: boolean
   accessControlRequired?: boolean
   acceptedAuthHeaders?: string[]
 }
@@ -138,6 +141,10 @@ export type Suggestion = {
   exampleRewrite?: string
   riskLevel: RiskLevel
   needsUserConfirmation: boolean
+  needsUserInput?: boolean
+  questions?: string[]
+  source?: SuggestionSource
+  blockedReason?: string
   status: SuggestionStatus
   createdAt: string
 }
@@ -153,6 +160,7 @@ export type InsertProposal = {
   updatedDraftDocument: DraftDocument
   placementReason: string
   needsUserConfirmation: boolean
+  missingFields?: string[]
   riskNotes: string[]
   status: InsertProposalStatus
 }
@@ -373,6 +381,20 @@ export type AnalyzeResumeResponse = {
   modelName: string
 }
 
+export type NewWorkExperience = {
+  companyName: string
+  positionTitle: string
+  employmentStart: string
+  employmentEnd: string
+  isCurrentRole: boolean
+  projectName: string
+  projectDescription: string
+  responsibilities: string
+  actions: string
+  outcomes: string
+  rawText: string
+}
+
 export type InsertExperienceResponse = {
   proposal: InsertProposal
 }
@@ -445,6 +467,7 @@ export const api = {
     sessionId: string
     draftDocument: DraftDocument
     newExperience: string
+    newWorkExperience?: NewWorkExperience
   }) =>
     request<InsertExperienceResponse>('/api/resumes/insert-experience', {
       method: 'POST',

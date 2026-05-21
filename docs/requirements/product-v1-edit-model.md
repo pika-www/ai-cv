@@ -13,6 +13,7 @@
 简历至少要分成这些可编辑块：
 
 - 基本信息
+- 照片
 - 教育经历
 - 工作经历
 - 项目经历
@@ -65,7 +66,7 @@ V1 中最重要的新增场景是：
 
 ## 新增经历操作
 
-新增经历应该被建模为独立操作，而不是普通聊天回复。
+新增工作经历应该被建模为独立操作，而不是普通聊天回复。
 
 推荐操作名：
 
@@ -76,6 +77,22 @@ V1 中最重要的新增场景是：
 - “我最近做了一个 Redis 缓存优化，把接口平均响应时间从 800ms 降到 300ms。”
 - “新增一个项目：AI 简历编辑器，前端 React，后端 Rust，支持 PDF 导出。”
 - “我负责过 Docker 部署和 CI/CD 流程优化。”
+
+结构化输入至少包含：
+
+- `companyName`
+- `positionTitle`
+- `employmentStart`
+- `employmentEnd`
+- `isCurrentRole`
+- `projectName`
+- `projectDescription`
+- `responsibilities`
+- `actions`
+- `outcomes`
+- `rawText`
+
+其中 `rawText` 用于补充用户自由描述，不能替代公司、职位和时间等关键字段。
 
 AI 必须输出：
 
@@ -121,6 +138,33 @@ AI 的输出必须是结构化的，不只是自然语言。
 - `blockedChanges`
 - `riskNotes`
 
+每条优化建议还应包含：
+
+- `suggestionId`
+- `targetSectionId`
+- `targetItemId`
+- `issue`
+- `recommendation`
+- `exampleRewrite`
+- `needsUserInput`
+- `questions`
+- `status`
+
+`exampleRewrite` 是可应用文本，不是给用户看的任务说明。
+
+允许：
+
+- “使用 Excel 建立销售数据透视表，按周汇总线索来源、转化率和跟进状态，支持团队复盘。”
+- “负责 Excel 数据清洗和报表维护，统一客户信息字段，减少重复录入。”
+
+不允许：
+
+- “会 Excel，建议补充你确认过的结果或范围。”
+- “使用 Excel 做数据分析，并填写具体业务结果。”
+- “如有数据，请补充提升百分比。”
+
+当 AI 认为信息不足时，应返回 `needsUserInput=true`、`questions` 或 `blockedReason`，而不是生成可应用改写。
+
 ## 事实规则
 
 AI 可以重写表达，但不能发明事实。
@@ -143,6 +187,22 @@ AI 可以重写表达，但不能发明事实。
 - 标记 blocked
 - 不进入可导出状态
 
+## 真实 AI 调用规则
+
+V1 的分析建议必须来自真实 AI provider。
+
+允许存在开发兜底：
+
+- provider 未配置时给开发者提示。
+- 本地环境 mock 数据用于 UI 调试。
+- provider 失败时返回可恢复错误。
+
+不允许：
+
+- 在验收环境用本地固定规则假装 AI 分析成功。
+- 在没有 provider 返回的情况下生成“优化建议”并允许用户应用。
+- 把同一组模板建议套到所有简历上。
+
 ## 预览模型
 
 预览不是另一份结果文本，而是同一份结构化文档的渲染视图。
@@ -152,6 +212,9 @@ AI 可以重写表达，但不能发明事实。
 - 预览改了，PDF 也必须改。
 - 预览排版和 PDF 排版必须同源。
 - 用户看到的就是最终稿长什么样。
+- 预览必须支持照片和完整基本信息。
+- 预览必须支持多页分页。
+- 分页结果不能裁切、重叠或丢失内容。
 
 ## 确认模型
 
