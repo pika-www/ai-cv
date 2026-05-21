@@ -69,6 +69,8 @@ export type HealthResponse = {
   version: string
   maxRequestBytes: number
   aiProviderConfigured: boolean
+  accessControlRequired?: boolean
+  acceptedAuthHeaders?: string[]
 }
 
 export type SessionSummary = {

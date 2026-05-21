@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ApiClientError,
   api,
+  hasAccessToken,
   setAccessToken,
   type DraftDocument,
   type ExportFormat,
@@ -113,7 +114,12 @@ function App() {
   useEffect(() => {
     api
       .health()
-      .then(setHealth)
+      .then((response) => {
+        setHealth(response)
+        if (response.accessControlRequired && !hasAccessToken()) {
+          setNeedsAccessToken(true)
+        }
+      })
       .catch(() => {
         setHealth(null)
       })
