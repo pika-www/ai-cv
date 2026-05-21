@@ -151,10 +151,7 @@ function App() {
   async function parseDraftFromText(): Promise<DraftDocument | null> {
     const text = resumeText.trim()
     if (text.length < minimumResumeChars) {
-      setError({
-        title: '简历内容太短',
-        details: `请至少粘贴 ${minimumResumeChars} 个字符的简历正文，或上传可读取出文本的文件。`,
-      })
+      setError(emptyResumeError())
       return null
     }
 
@@ -356,6 +353,13 @@ function App() {
 
   function applySuggestion(suggestion: Suggestion) {
     if (!draftDocument || !suggestion.targetItemId || !suggestion.exampleRewrite) return
+    if (!isSafeSuggestionRewrite(suggestion.exampleRewrite)) {
+      setError({
+        title: '这条建议不能直接应用',
+        details: '建议改写里仍包含提示语，需要先手动改成可以直接进入简历的成品句。',
+      })
+      return
+    }
     replaceDraftDocument({
       ...draftDocument,
       revision: draftDocument.revision + 1,
@@ -482,34 +486,26 @@ function App() {
     resetDraftState()
 
     const extension = fileExtension(file.name)
-    if (extension === 'pdf' || extension === 'docx') {
-      setError({
-        title: '暂不直接读取 PDF/DOCX',
-        details: '当前版本还没有后端文件解析接口。请先从 PDF 或 DOCX 复制简历正文，粘贴到输入框后继续分析；你的文件不会被上传。',
-      })
-      setStatus('idle')
-      return
-    }
-
-    if (extension !== 'txt' && extension !== 'md') {
+    if (extension !== 'txt' && extension !== 'md' && extension !== 'pdf' && extension !== 'docx') {
       setError({
         title: '这个格式不能直接解析',
-        details: '当前只直接读取 TXT 和 Markdown。其他格式请复制简历正文后粘贴，避免把二进制内容误当作简历文本。',
+        details: '当前支持 TXT、Markdown、PDF 和 DOCX。其他格式请复制简历正文后粘贴，避免把二进制内容误当作简历文本。',
       })
       setStatus('idle')
       return
     }
 
     try {
-      const text = await file.text()
+      const text = await extractResumeText(file, extension)
       setResumeText(text)
       if (text.trim().length < minimumResumeChars) {
         setError({
-          title: '已读取文件，但内容太短',
-          details: '这个文件没有读出足够的可用正文。请补充简历内容，或复制完整正文后粘贴。',
+          title: '文件里没有读出足够的简历正文',
+          details: uploadExtractionFallbackDetails(extension),
         })
         setStatus('failed')
       } else {
+        setError(null)
         setStatus('idle')
       }
     } catch (caught) {
@@ -662,7 +658,7 @@ function App() {
               />
               <div className="add-side">
                 <p>AI 会判断这段内容应该放进工作经历、项目经历或技能区。插入结果需要你确认后才会进入导出。</p>
-                <button className="button primary" disabled={!draftDocument || status === 'inserting'} onClick={insertExperience} type="button">
+                <button className="button primary" disabled={status === 'inserting'} onClick={insertExperience} type="button">
                   {status === 'inserting' ? '正在判断位置' : '放入简历'}
                 </button>
               </div>
@@ -789,7 +785,7 @@ function ImportPanel({
         onChange={(event) => onTextChange(event.target.value)}
       />
       <div className="import-footer">
-        <span>{fileName ? `已选择 ${fileName}` : '支持选择所有格式；会先尝试读取文本内容'}</span>
+        <span>{importFooterText(fileName)}</span>
         <div className="button-row">
           <button className="button secondary" onClick={onSample} type="button">使用示例</button>
           <button className="button primary" onClick={onAnalyze} type="button">解析并分析</button>
@@ -916,7 +912,7 @@ function SuggestionList({
             </div>
           )}
           <div className="button-row">
-            <button className="button primary small" disabled={!suggestion.exampleRewrite} onClick={() => onApply(suggestion)} type="button">
+            <button className="button primary small" disabled={!isSafeSuggestionRewrite(suggestion.exampleRewrite)} onClick={() => onApply(suggestion)} type="button">
               应用
             </button>
             <button className="button secondary small" onClick={() => onIgnore(suggestion.suggestionId)} type="button">
@@ -1082,6 +1078,23 @@ function normalizeError(caught: unknown, fallbackTitle: string): AppError {
   return { title: fallbackTitle, details: '请稍后重试。' }
 }
 
+function isSafeSuggestionRewrite(rewrite: string | null | undefined) {
+  if (!rewrite?.trim()) return false
+  const blockedPhrases = [
+    '补充你确认',
+    '你确认过',
+    '如果你有',
+    '需要确认',
+    '请补充',
+    '结果或范围',
+    'confirmed result',
+    'added by you',
+    'if you have',
+  ]
+  const lower = rewrite.toLowerCase()
+  return !blockedPhrases.some((phrase) => lower.includes(phrase.toLowerCase()))
+}
+
 function isUnauthorizedError(caught: unknown) {
   return caught instanceof ApiClientError && caught.status === 401
 }
@@ -1105,6 +1118,67 @@ function supportedBackendMimeType(name: string | null) {
 
 function fileExtension(name: string) {
   return name.split('.').pop()?.toLowerCase() ?? ''
+}
+
+function emptyResumeError(): AppError {
+  return {
+    title: '简历内容太短',
+    details: `请至少粘贴 ${minimumResumeChars} 个字符的简历正文，或上传可读取文本的 TXT / Markdown / PDF / DOCX 文件。`,
+  }
+}
+
+function importFooterText(fileName: string | null) {
+  if (!fileName) return '支持 TXT / Markdown / PDF / DOCX；扫描版 PDF 可能需要复制正文后粘贴'
+  const extension = fileExtension(fileName)
+  if (extension === 'pdf' || extension === 'docx') return `已读取 ${fileName}，请确认文本区内容是否完整`
+  return `已读取 ${fileName}`
+}
+
+async function extractResumeText(file: File, extension: string) {
+  if (extension === 'pdf') return extractPdfText(file)
+  if (extension === 'docx') return extractDocxText(file)
+  return file.text()
+}
+
+async function extractPdfText(file: File) {
+  const pdfjs = await import('pdfjs-dist')
+  const pdfWorkerUrl = await import('pdfjs-dist/build/pdf.worker.mjs?url')
+  pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl.default
+
+  const data = await file.arrayBuffer()
+  const document = await pdfjs.getDocument({ data }).promise
+  const pages: string[] = []
+
+  for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
+    const page = await document.getPage(pageNumber)
+    const content = await page.getTextContent()
+    const pageText = content.items
+      .map((item) => ('str' in item ? item.str : ''))
+      .join(' ')
+      .replace(/[ \t]+/g, ' ')
+      .trim()
+    if (pageText) pages.push(pageText)
+  }
+
+  await document.destroy()
+  return pages.join('\n\n')
+}
+
+async function extractDocxText(file: File) {
+  const { default: mammoth } = await import('mammoth/mammoth.browser')
+  const arrayBuffer = await file.arrayBuffer()
+  const result = await mammoth.extractRawText({ arrayBuffer })
+  return result.value.trim()
+}
+
+function uploadExtractionFallbackDetails(extension: string) {
+  if (extension === 'pdf') {
+    return '这个 PDF 可能是扫描版图片，浏览器没有读出可分析的文字。请使用可复制文字的 PDF，或从文件里复制简历正文后粘贴。'
+  }
+  if (extension === 'docx') {
+    return '这个 DOCX 没有读出足够的正文。请确认文件内容不是图片，或复制简历正文后粘贴。'
+  }
+  return '这个文件没有读出足够的可用正文。请补充简历内容，或复制完整正文后粘贴。'
 }
 
 function draftPdfFileName(draftDocument: DraftDocument) {
