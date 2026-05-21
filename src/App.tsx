@@ -38,6 +38,11 @@ type AppError = {
   details: string
 }
 
+type AnalyzeProgress = {
+  stage: string
+  message: string
+}
+
 type BrowserPdfExport = {
   fileName: string
   contentType: string
@@ -176,6 +181,7 @@ function App() {
   const [draftDocument, setDraftDocument] = useState<DraftDocument | null>(null)
   const [warnings, setWarnings] = useState<string[]>([])
   const [suggestions, setSuggestions] = useState<Suggestion[]>([])
+  const [analyzeProgress, setAnalyzeProgress] = useState<AnalyzeProgress | null>(null)
   const [aiSettingsOpen, setAiSettingsOpen] = useState(false)
   const [aiProviderForm, setAiProviderForm] = useState<AiProviderForm>(() => loadStoredAiProviderForm())
   const [aiProviderConfig, setAiProviderConfig] = useState<AiProviderConfigResponse | null>(null)
@@ -337,19 +343,35 @@ function App() {
 
     setError(null)
     setStatus('analyzing')
+    setAnalyzeProgress({ stage: 'starting', message: '正在准备分析请求' })
     try {
-      const response = await api.analyzeResume({
+      const request = {
         sessionId: activeDraft.sessionId,
         aiKeyMode,
         draftDocument: activeDraft,
         analysisGoal: 'improve_clarity',
+      }
+      const response = await api.analyzeResumeStream(request, (event) => {
+        setAnalyzeProgress({ stage: event.stage, message: localizeBackendText(event.message) })
+      }).catch((caught) => {
+        if (canFallbackToPlainAnalyze(caught)) {
+          setAnalyzeProgress({ stage: 'calling_ai', message: '正在调用 AI 分析简历' })
+          return api.analyzeResume(request)
+        }
+        throw caught
       })
       setSuggestions(response.suggestions)
+      setAnalyzeProgress({ stage: 'done', message: '简历分析完成' })
       setStatus('editing')
     } catch (caught) {
       if (isUnauthorizedError(caught)) setNeedsAccessToken(true)
       setStatus('failed')
       setError(normalizeError(caught, 'AI 分析失败'))
+      setAnalyzeProgress(null)
+    } finally {
+      window.setTimeout(() => {
+        setAnalyzeProgress((current) => (current?.stage === 'done' ? null : current))
+      }, 1200)
     }
   }
 
@@ -830,6 +852,13 @@ function App() {
         <section className="notice error" role="alert">
           <strong>{error.title}</strong>
           <p>{error.details}</p>
+        </section>
+      )}
+
+      {analyzeProgress && (
+        <section className="notice compact analyze-progress" aria-live="polite">
+          <strong>{analysisStageLabel(analyzeProgress.stage)}</strong>
+          <p>{analyzeProgress.message}</p>
         </section>
       )}
 
@@ -1818,6 +1847,23 @@ function normalizeError(caught: unknown, fallbackTitle: string): AppError {
   return { title: fallbackTitle, details: '请稍后重试。' }
 }
 
+function canFallbackToPlainAnalyze(caught: unknown) {
+  return caught instanceof ApiClientError
+    && (caught.status === 404 || caught.status === 405 || caught.code === 'stream_unavailable' || caught.code === 'stream_incomplete')
+}
+
+function analysisStageLabel(stage: string) {
+  const labels: Record<string, string> = {
+    starting: '准备分析',
+    validating: '校验简历',
+    calling_ai: '调用 AI',
+    finalizing: '整理建议',
+    done: '分析完成',
+    error: '分析失败',
+  }
+  return labels[stage] ?? '分析进度'
+}
+
 function aiProviderNotConfiguredError(title: string): AppError {
   return {
     title,
@@ -1828,7 +1874,7 @@ function aiProviderNotConfiguredError(title: string): AppError {
 function isAiAnalysisUnavailable(health: HealthResponse | null, hasUserAiKey: boolean) {
   if (!health) return false
   if (hasUserAiKey) return false
-  if (health.aiAnalysisAvailable === false) return true
+  if (typeof health.aiAnalysisAvailable === 'boolean') return !health.aiAnalysisAvailable
   return health.aiProviderConfigured === false
 }
 

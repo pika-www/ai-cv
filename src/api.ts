@@ -383,6 +383,21 @@ export type AnalyzeResumeResponse = {
   modelName: string
 }
 
+export type AnalyzeResumeRequest = {
+  sessionId: string
+  aiKeyMode?: AiKeyMode
+  draftDocument: DraftDocument
+  analysisGoal?: string
+}
+
+export type AnalyzeStreamStage = 'validating' | 'calling_ai' | 'finalizing' | 'done' | 'error' | string
+
+export type AnalyzeStreamEvent = {
+  stage: AnalyzeStreamStage
+  message: string
+  data?: unknown
+}
+
 export type NewWorkExperience = {
   companyName: string
   positionTitle: string
@@ -464,6 +479,92 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   return payload as T
 }
 
+async function streamRequest(
+  path: string,
+  body: unknown,
+  onEvent: (event: AnalyzeStreamEvent, eventName: string) => void,
+): Promise<AnalyzeResumeResponse> {
+  const headers = new Headers()
+  headers.set('content-type', 'application/json')
+  headers.set('accept', 'text/event-stream')
+  if (runtimeAccessToken) {
+    headers.set('authorization', `Bearer ${runtimeAccessToken}`)
+  }
+
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+  })
+
+  if (!response.ok) {
+    const text = await response.text()
+    const payload = text ? JSON.parse(text) : null
+    throw new ApiClientError(
+      response.status,
+      payload?.code ?? 'request_error',
+      payload?.error ?? '请求失败',
+      payload?.details ?? '后端暂时不可用，请稍后重试。',
+      payload?.recoverable ?? true,
+    )
+  }
+
+  if (!response.body) {
+    throw new ApiClientError(0, 'stream_unavailable', '分析进度不可用', '后端没有返回可读取的进度流，请稍后重试。', true)
+  }
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let finalResponse: AnalyzeResumeResponse | null = null
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const chunks = buffer.split(/\n\n/)
+    buffer = chunks.pop() ?? ''
+    for (const chunk of chunks) {
+      const parsed = parseSseChunk(chunk)
+      if (!parsed) continue
+      onEvent(parsed.payload, parsed.eventName)
+      if (parsed.eventName === 'done') {
+        finalResponse = parsed.payload.data as AnalyzeResumeResponse
+      }
+      if (parsed.eventName === 'error') {
+        const payload = parsed.payload.data as Partial<ApiClientError> & { code?: string; error?: string; details?: string; recoverable?: boolean }
+        throw new ApiClientError(
+          200,
+          payload?.code ?? 'stream_error',
+          payload?.error ?? parsed.payload.message ?? 'AI 分析失败',
+          payload?.details ?? parsed.payload.message ?? 'AI 分析暂时失败，请稍后重试。',
+          payload?.recoverable ?? true,
+        )
+      }
+    }
+  }
+
+  if (!finalResponse) {
+    throw new ApiClientError(0, 'stream_incomplete', 'AI 分析未完成', '分析进度流提前结束，请稍后重试；你的编辑内容已保留。', true)
+  }
+
+  return finalResponse
+}
+
+function parseSseChunk(chunk: string) {
+  const lines = chunk.split(/\n/)
+  const eventName = lines.find((line) => line.startsWith('event:'))?.replace(/^event:\s*/, '').trim() || 'message'
+  const data = lines
+    .filter((line) => line.startsWith('data:'))
+    .map((line) => line.replace(/^data:\s*/, ''))
+    .join('\n')
+  if (!data) return null
+  return {
+    eventName,
+    payload: JSON.parse(data) as AnalyzeStreamEvent,
+  }
+}
+
 export const api = {
   health: () => request<HealthResponse>('/health', { method: 'GET' }),
   createSession: (body: { locale: Locale; targetLanguage: Locale }) =>
@@ -483,16 +584,13 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
-  analyzeResume: (body: {
-    sessionId: string
-    aiKeyMode?: AiKeyMode
-    draftDocument: DraftDocument
-    analysisGoal?: string
-  }) =>
+  analyzeResume: (body: AnalyzeResumeRequest) =>
     request<AnalyzeResumeResponse>('/api/resumes/analyze', {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  analyzeResumeStream: (body: AnalyzeResumeRequest, onEvent: (event: AnalyzeStreamEvent, eventName: string) => void) =>
+    streamRequest('/api/resumes/analyze/stream', body, onEvent),
   insertExperience: (body: {
     sessionId: string
     draftDocument: DraftDocument
