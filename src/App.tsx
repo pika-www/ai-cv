@@ -317,7 +317,7 @@ function App() {
       setSessionId(response.session.sessionId)
       setDraftHistory([])
       replaceDraftDocument(response.draftDocument, false)
-      setResumeProfile((current) => mergeProfileFromDraft(current, response.draftDocument, fileName))
+      setResumeProfile((current) => mergeProfileFromDraft(current, response.draftDocument, fileName, text))
       setWarnings(localizeBackendTexts(response.warnings))
       setSuggestions([])
       setInsertProposal(null)
@@ -532,23 +532,28 @@ function App() {
   }
 
   function applySuggestion(suggestion: Suggestion) {
-    if (!draftDocument || !suggestion.targetItemId || !suggestion.exampleRewrite) return
-    if (!isSafeSuggestionRewrite(suggestion.exampleRewrite)) {
+    if (!draftDocument) return
+
+    const blocker = getSuggestionApplyBlocker(suggestion)
+    if (blocker) {
       setError({
         title: '这条建议不能直接应用',
-        details: '建议改写里仍包含提示语，需要先手动改成可以直接进入简历的成品句。',
+        details: blocker,
       })
       return
     }
-    if (!canApplySuggestion(suggestion)) {
+
+    const targetExists = draftDocument.sections.some((section) => (
+      section.items.some((item) => item.itemId === suggestion.targetItemId)
+    ))
+    if (!targetExists) {
       setError({
-        title: '这条建议需要先补充信息',
-        details: suggestion.blockedReason
-          ? localizeBackendText(suggestion.blockedReason)
-          : 'AI 标记这条建议需要用户补充或确认，不能直接写入可导出的简历。',
+        title: '这条建议不能直接应用',
+        details: '这条建议没有找到对应的简历条目，请先手动编辑对应内容。',
       })
       return
     }
+
     replaceDraftDocument({
       ...draftDocument,
       revision: draftDocument.revision + 1,
@@ -1503,47 +1508,51 @@ function SuggestionList({
 
   return (
     <div className="suggestion-list">
-      {suggestions.map((suggestion) => (
-        <article className={`suggestion-card ${suggestion.riskLevel}`} key={suggestion.suggestionId}>
-          <div className="suggestion-head">
-            <span className={`risk ${suggestion.riskLevel}`}>{riskLabel[suggestion.riskLevel]}</span>
-            {suggestion.needsUserConfirmation && <span className="risk confirm">需用户确认</span>}
-          </div>
-          <h3>{localizeBackendText(suggestion.issue)}</h3>
-          {suggestion.targetText && <blockquote>{suggestion.targetText}</blockquote>}
-          <p>{localizeBackendText(suggestion.recommendation)}</p>
-          {suggestion.exampleRewrite && (
-            <div className="rewrite-box">
-              <span>建议改写</span>
-              <p>{suggestion.exampleRewrite}</p>
+      {suggestions.map((suggestion) => {
+        const applyBlocker = getSuggestionApplyBlocker(suggestion)
+        return (
+          <article className={`suggestion-card ${suggestion.riskLevel}`} key={suggestion.suggestionId}>
+            <div className="suggestion-head">
+              <span className={`risk ${suggestion.riskLevel}`}>{riskLabel[suggestion.riskLevel]}</span>
+              {suggestion.needsUserConfirmation && <span className="risk confirm">需用户确认</span>}
             </div>
-          )}
-          <SuggestionGuardrails suggestion={suggestion} />
-          <div className="button-row">
-            <button className="button primary small" disabled={!isSafeSuggestionRewrite(suggestion.exampleRewrite) || !canApplySuggestion(suggestion)} onClick={() => onApply(suggestion)} type="button">
-              应用
-            </button>
-            <button className="button secondary small" onClick={() => onIgnore(suggestion.suggestionId)} type="button">
-              忽略
-            </button>
-          </div>
-        </article>
-      ))}
+            <h3>{localizeBackendText(suggestion.issue)}</h3>
+            {suggestion.targetText && <blockquote>{suggestion.targetText}</blockquote>}
+            <p>{localizeBackendText(suggestion.recommendation)}</p>
+            {suggestion.exampleRewrite && (
+              <div className="rewrite-box">
+                <span>建议改写</span>
+                <p>{suggestion.exampleRewrite}</p>
+              </div>
+            )}
+            <SuggestionGuardrails applyBlocker={applyBlocker} suggestion={suggestion} />
+            <div className="button-row">
+              <button className="button primary small" disabled={Boolean(applyBlocker)} onClick={() => onApply(suggestion)} type="button">
+                应用
+              </button>
+              <button className="button secondary small" onClick={() => onIgnore(suggestion.suggestionId)} type="button">
+                忽略
+              </button>
+            </div>
+          </article>
+        )
+      })}
     </div>
   )
 }
 
-function SuggestionGuardrails({ suggestion }: { suggestion: Suggestion }) {
+function SuggestionGuardrails({ applyBlocker, suggestion }: { applyBlocker: string | null; suggestion: Suggestion }) {
   const questions = suggestion.questions ?? []
-  if (!suggestion.needsUserInput && !suggestion.blockedReason && questions.length === 0 && !suggestion.source) {
+  if (!applyBlocker && !suggestion.needsUserInput && !suggestion.blockedReason && questions.length === 0 && !suggestion.source) {
     return null
   }
 
   return (
-    <div className={suggestion.needsUserInput || suggestion.blockedReason ? 'suggestion-guard blocked' : 'suggestion-guard'}>
+    <div className={applyBlocker || suggestion.needsUserInput || suggestion.blockedReason ? 'suggestion-guard blocked' : 'suggestion-guard'}>
       {suggestion.source && (
         <span>{suggestion.source === 'ai_provider' ? '来源：真实 AI provider' : '来源：本地开发兜底，不作为验收建议'}</span>
       )}
+      {applyBlocker && <p>{applyBlocker}</p>}
       {suggestion.blockedReason && <p>{localizeBackendText(suggestion.blockedReason)}</p>}
       {suggestion.needsUserInput && <p>这条建议需要你先补充信息，暂不能一键应用。</p>}
       {questions.length > 0 && (
@@ -1783,18 +1792,25 @@ function itemTypeForSection(sectionType: ResumeSection['sectionType']): ResumeIt
   return 'list_item'
 }
 
-function mergeProfileFromDraft(current: ResumeProfile, draftDocument: DraftDocument, fallbackName: string | null): ResumeProfile {
-  const text = visibleSections(draftDocument).flatMap((section) => section.items.map((item) => item.text)).join('\n')
-  const lines = text.split(/\n+/).map((line) => line.trim()).filter(Boolean)
-  const firstLine = lines.find((line) => line.length <= 18 && !line.includes('@') && !line.includes('：') && !line.includes(':'))
+function mergeProfileFromDraft(current: ResumeProfile, draftDocument: DraftDocument, fallbackName: string | null, sourceText = ''): ResumeProfile {
+  const draftText = visibleSections(draftDocument).flatMap((section) => section.items.map((item) => item.text)).join('\n')
+  const text = [sourceText, draftText].filter(Boolean).join('\n')
+  const sourceLines = profileLines(sourceText)
+  const lines = profileLines(text)
   const email = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0] ?? ''
   const phone = text.match(/(?:\+?86[-\s]?)?1[3-9]\d[\s-]?\d{4}[\s-]?\d{4}/)?.[0] ?? ''
-  const city = inferCity(text)
-  const nameFromFile = fallbackName?.replace(/\.[^.]+$/, '').replace(/[_-]/g, ' ').trim() ?? ''
-  const targetRole = inferTargetRole(lines)
+  const city = extractProfileField(lines, ['城市', '所在地', '现居地', 'City', 'Location']) || inferCity(text)
+  const nameFromFile = cleanNameFromFile(fallbackName)
+  const fullName = extractProfileField(lines, ['姓名', '名字', 'Name', 'Full Name'])
+    || inferFullName(sourceLines)
+    || inferFullName(lines)
+    || nameFromFile
+  const targetRole = extractProfileField(lines, ['求职意向', '目标岗位', '意向岗位', '应聘岗位', '职位目标', 'Target Role', 'Desired Role', 'Objective'])
+    || inferTargetRole(sourceLines)
+    || inferTargetRole(lines)
 
   return {
-    fullName: current.fullName || firstLine || nameFromFile,
+    fullName: current.fullName || fullName,
     phone: current.phone || phone,
     email: current.email || email,
     city: current.city || city,
@@ -1803,16 +1819,74 @@ function mergeProfileFromDraft(current: ResumeProfile, draftDocument: DraftDocum
   }
 }
 
+function profileLines(text: string) {
+  return text.split(/\n+/).map((line) => line.trim()).filter(Boolean)
+}
+
+function extractProfileField(lines: string[], labels: string[]) {
+  for (const line of lines) {
+    const normalized = line.replace(/\s+/g, ' ').trim()
+    for (const label of labels) {
+      const pattern = new RegExp(`^${escapeRegExp(label)}\\s*(?:[:：|｜-]\\s*)?(.+)$`, 'i')
+      const match = normalized.match(pattern)
+      if (match?.[1]) return cleanProfileValue(match[1])
+    }
+  }
+  return ''
+}
+
+function inferFullName(lines: string[]) {
+  return lines.find((line) => {
+    const value = cleanProfileValue(line)
+    if (!value || value.length > 32) return false
+    if (isResumeSectionTitle(value) || isContactLine(value) || isLikelyTargetRole(value)) return false
+    if (/[:：@/|｜,，]/.test(value)) return false
+    return /^[\u4e00-\u9fff]{2,4}(?:[·•][\u4e00-\u9fff]{1,4})?$/.test(value)
+      || /^[A-Za-z][A-Za-z.'-]+(?:\s+[A-Za-z][A-Za-z.'-]+){1,3}$/.test(value)
+  }) ?? ''
+}
+
 function inferCity(text: string) {
   const knownCities = ['北京', '上海', '广州', '深圳', '杭州', '南京', '成都', '武汉', '西安', '苏州', '重庆', '天津']
   return knownCities.find((city) => text.includes(city)) ?? ''
 }
 
 function inferTargetRole(lines: string[]) {
-  return lines.find((line) => (
-    /工程师|设计师|产品经理|运营|分析师|开发|前端|后端|全栈|数据|销售|市场/.test(line)
-    && line.length <= 48
-  )) ?? ''
+  const targetLine = lines.find((line) => {
+    const value = cleanProfileValue(line)
+    return !isContactLine(value) && isLikelyTargetRole(value) && value.length <= 48
+  })
+  return targetLine ? stripProfileLabel(targetLine) : ''
+}
+
+function cleanNameFromFile(name: string | null) {
+  if (!name) return ''
+  const value = name.replace(/\.[^.]+$/, '').replace(/[_-]/g, ' ').trim()
+  return inferFullName([value])
+}
+
+function cleanProfileValue(value: string) {
+  return stripProfileLabel(value).replace(/\s+/g, ' ').trim()
+}
+
+function stripProfileLabel(value: string) {
+  return value.replace(/^(姓名|名字|Name|Full Name|电话|手机|邮箱|城市|所在地|现居地|求职意向|目标岗位|意向岗位|应聘岗位|职位目标|Target Role|Desired Role|Objective)\s*[:：|｜-]?\s*/i, '').trim()
+}
+
+function isContactLine(value: string) {
+  return /@|(?:\+?86[-\s]?)?1[3-9]\d[\s-]?\d{4}[\s-]?\d{4}|电话|手机|邮箱|城市|所在地|现居地|City|Location/i.test(value)
+}
+
+function isResumeSectionTitle(value: string) {
+  return /^(基本信息|个人信息|个人总结|工作经历|项目经历|教育经历|技能|证书|其他|Basic Info|Summary|Work Experience|Project Experience|Education|Skills|Certifications|Additional)$/i.test(value)
+}
+
+function isLikelyTargetRole(value: string) {
+  return /工程师|设计师|产品经理|运营|分析师|开发|前端|后端|全栈|数据|销售|市场|Engineer|Designer|Manager|Developer|Analyst/i.test(value)
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 function normalizeError(caught: unknown, fallbackTitle: string): AppError {
@@ -1934,8 +2008,13 @@ function isSafeSuggestionRewrite(rewrite: string | null | undefined) {
   return !blockedPhrases.some((phrase) => lower.includes(phrase.toLowerCase()))
 }
 
-function canApplySuggestion(suggestion: Suggestion) {
-  return !suggestion.needsUserInput && !suggestion.blockedReason
+function getSuggestionApplyBlocker(suggestion: Suggestion) {
+  if (!suggestion.targetItemId) return '这条建议没有绑定到具体简历条目，需要手动编辑对应内容。'
+  if (!suggestion.exampleRewrite?.trim()) return '这条建议没有可直接写入简历的改写文本。'
+  if (!isSafeSuggestionRewrite(suggestion.exampleRewrite)) return '建议改写里仍包含提示语，需要先手动改成可以直接进入简历的成品句。'
+  if (suggestion.blockedReason) return localizeBackendText(suggestion.blockedReason)
+  if (suggestion.needsUserInput) return 'AI 标记这条建议需要你补充信息，不能直接写入可导出的简历。'
+  return null
 }
 
 function isUnauthorizedError(caught: unknown) {
