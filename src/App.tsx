@@ -16,6 +16,7 @@ import {
   type Suggestion,
 } from './api'
 import './App.css'
+import { localizeBackendText, localizeBackendTexts } from './localization'
 
 type WorkflowStatus =
   | 'idle'
@@ -171,7 +172,7 @@ function App() {
       setSessionId(response.session.sessionId)
       setDraftHistory([])
       replaceDraftDocument(response.draftDocument, false)
-      setWarnings(response.warnings)
+      setWarnings(localizeBackendTexts(response.warnings))
       setSuggestions([])
       setInsertProposal(null)
       setStatus('editing')
@@ -514,7 +515,7 @@ function App() {
     } catch (caught) {
       setError({
         title: '文件读取失败',
-        details: caught instanceof Error ? caught.message : '浏览器无法读取这个文件，请复制简历正文后粘贴。',
+        details: caught instanceof Error ? localizeBackendText(caught.message) : '浏览器无法读取这个文件，请复制简历正文后粘贴。',
       })
       setStatus('failed')
     }
@@ -688,10 +689,10 @@ function App() {
                 value={insertProposal.insertedText}
                 onChange={(event) => editInsertProposalText(event.target.value)}
               />
-              <p className="muted">{insertProposal.placementReason}</p>
+              <p className="muted">{localizeBackendText(insertProposal.placementReason)}</p>
               {insertProposal.riskNotes.length > 0 && (
                 <ul className="risk-list">
-                  {insertProposal.riskNotes.map((note) => <li key={note}>{note}</li>)}
+                  {insertProposal.riskNotes.map((note) => <li key={note}>{localizeBackendText(note)}</li>)}
                 </ul>
               )}
               <div className="button-row">
@@ -905,9 +906,9 @@ function SuggestionList({
             <span className={`risk ${suggestion.riskLevel}`}>{riskLabel[suggestion.riskLevel]}</span>
             {suggestion.needsUserConfirmation && <span className="risk confirm">需用户确认</span>}
           </div>
-          <h3>{suggestion.issue}</h3>
+          <h3>{localizeBackendText(suggestion.issue)}</h3>
           {suggestion.targetText && <blockquote>{suggestion.targetText}</blockquote>}
-          <p>{suggestion.recommendation}</p>
+          <p>{localizeBackendText(suggestion.recommendation)}</p>
           {suggestion.exampleRewrite && (
             <div className="rewrite-box">
               <span>建议改写</span>
@@ -1063,7 +1064,10 @@ function normalizeError(caught: unknown, fallbackTitle: string): AppError {
         details: '服务暂时没有完成处理，请稍后重试；你的编辑内容已保留。',
       }
     }
-    return { title: caught.message || fallbackTitle, details: caught.details || '请检查输入内容后重试。' }
+    return {
+      title: localizeBackendText(caught.message) || fallbackTitle,
+      details: localizeBackendText(caught.details) || '请检查输入内容后重试。',
+    }
   }
   if (caught instanceof Error) {
     const message = caught.message.toLowerCase()
