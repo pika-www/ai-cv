@@ -22,6 +22,7 @@ export type SuggestionSource = 'ai_provider' | 'local_development_fallback'
 export type InsertPosition = 'end'
 export type InsertProposalStatus = 'proposed' | 'accepted' | 'edited' | 'rejected' | 'blocked'
 export type AiKeyMode = 'owner_default' | 'user_session_key' | 'not_configured'
+export type AiWireApi = 'responses' | 'chat_completions'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:4000'
 const ACCESS_TOKEN_STORAGE_KEY = 'ai-cv-access-token'
@@ -416,6 +417,7 @@ export type AiProviderConfigInput = {
   provider?: string
   baseUrl: string
   model?: string
+  wireApi?: AiWireApi
   apiKey: string
   reasoningEffort?: string
   disableResponseStorage?: boolean
@@ -428,6 +430,7 @@ export type AiProviderConfigResponse = {
   provider: string
   baseUrl: string
   model: string
+  wireApi?: AiWireApi | string
   apiKeyMask: string
   keyStatus: 'configured' | string
   createdAt: string
@@ -593,6 +596,7 @@ export const api = {
     streamRequest('/api/resumes/analyze/stream', body, onEvent),
   insertExperience: (body: {
     sessionId: string
+    aiKeyMode?: AiKeyMode
     draftDocument: DraftDocument
     newExperience: string
     newWorkExperience?: NewWorkExperience

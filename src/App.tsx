@@ -5,6 +5,7 @@ import {
   hasAccessToken,
   setAccessToken,
   type AiKeyMode,
+  type AiWireApi,
   type AiProviderConfigResponse,
   type DraftDocument,
   type ExportFormat,
@@ -69,6 +70,7 @@ type AiProviderForm = {
   provider: string
   baseUrl: string
   model: string
+  wireApi: AiWireApi
   apiKey: string
   rememberInBrowser: boolean
 }
@@ -152,6 +154,7 @@ const defaultAiProviderForm: AiProviderForm = {
   provider: 'openai_compatible',
   baseUrl: '',
   model: 'gpt-5.5',
+  wireApi: 'responses',
   apiKey: '',
   rememberInBrowser: false,
 }
@@ -209,7 +212,7 @@ function App() {
   }, [])
 
   const draftStats = useMemo(() => getDraftStats(draftDocument), [draftDocument])
-  const activeSuggestions = suggestions.filter((suggestion) => suggestion.status === 'open')
+  const activeSuggestions = suggestions.filter((suggestion) => suggestion.status === 'open' || suggestion.status === 'blocked')
   const appliedSuggestions = suggestions.filter((suggestion) => suggestion.status === 'applied')
   const canUseBackend = health?.ok === true
   const hasUserAiKey = aiProviderConfig?.keyStatus === 'configured'
@@ -244,6 +247,7 @@ function App() {
         provider: aiProviderForm.provider.trim() || undefined,
         baseUrl: aiProviderForm.baseUrl.trim(),
         model: aiProviderForm.model.trim() || undefined,
+        wireApi: aiProviderForm.wireApi,
         apiKey: aiProviderForm.apiKey.trim(),
         rememberInBrowser: aiProviderForm.rememberInBrowser,
         disableResponseStorage: true,
@@ -402,6 +406,7 @@ function App() {
     try {
       const response = await api.insertExperience({
         sessionId: draftDocument.sessionId,
+        aiKeyMode,
         draftDocument,
         newExperience: text,
         newWorkExperience,
@@ -1086,7 +1091,7 @@ function AiProviderPanel({
       <div className="ai-settings-head">
         <div>
           <strong>{config ? `已配置：${config.apiKeyMask}` : hasDefaultProvider ? '使用默认模型' : '需要模型 key'}</strong>
-          <p>key 仅用于本次 AI 分析和简历编辑请求，不会写入导出文件。</p>
+          <p>key 仅用于本次 AI 分析和简历编辑请求，不会写入导出文件。{config?.wireApi ? `当前协议：${wireApiLabel(config.wireApi)}` : ''}</p>
         </div>
         <button className="button secondary small" onClick={onToggle} type="button">
           {isOpen ? '收起' : '模型设置'}
@@ -1107,6 +1112,13 @@ function AiProviderPanel({
             <label>
               <span>model</span>
               <input value={form.model} onChange={(event) => onUpdate('model', event.target.value)} placeholder="gpt-5.5" />
+            </label>
+            <label>
+              <span>wire API</span>
+              <select value={form.wireApi} onChange={(event) => onUpdate('wireApi', event.target.value)}>
+                <option value="responses">Responses</option>
+                <option value="chat_completions">Chat Completions</option>
+              </select>
             </label>
             <label>
               <span>API key</span>
@@ -1975,12 +1987,21 @@ function loadStoredAiProviderForm(): AiProviderForm {
       provider: parsed.provider || defaultAiProviderForm.provider,
       baseUrl: parsed.baseUrl || defaultAiProviderForm.baseUrl,
       model: parsed.model || defaultAiProviderForm.model,
+      wireApi: normalizeWireApi(parsed.wireApi),
       apiKey: parsed.apiKey || defaultAiProviderForm.apiKey,
       rememberInBrowser: true,
     }
   } catch {
     return defaultAiProviderForm
   }
+}
+
+function normalizeWireApi(value: unknown): AiWireApi {
+  return value === 'chat_completions' ? 'chat_completions' : 'responses'
+}
+
+function wireApiLabel(value: string) {
+  return value === 'chat_completions' ? 'Chat Completions' : 'Responses'
 }
 
 function saveStoredAiProviderForm(input: AiProviderForm) {
