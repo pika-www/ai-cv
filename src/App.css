@@ -293,6 +293,65 @@ label.button {
   padding: 0 10px;
 }
 
+.ai-settings-panel {
+  border-color: rgba(47, 95, 143, 0.26);
+  background: rgba(47, 95, 143, 0.08);
+}
+
+.ai-settings-head {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-gap);
+  align-items: flex-start;
+}
+
+.ai-settings-panel p {
+  color: #d4d4d4;
+}
+
+.ai-settings-body {
+  display: grid;
+  gap: var(--space-gap);
+  margin-top: var(--space-card);
+}
+
+.ai-settings-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-gap);
+}
+
+.ai-settings-grid label {
+  display: grid;
+  gap: 6px;
+}
+
+.ai-settings-grid span,
+.remember-key-control span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.remember-key-control {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.remember-key-control input {
+  width: 16px;
+  min-height: 16px;
+  margin-top: 2px;
+  accent-color: var(--accent);
+}
+
+.ai-settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-tight);
+}
+
 .workspace {
   display: grid;
   grid-template-columns: minmax(680px, 1fr) minmax(360px, 420px);
@@ -1201,8 +1260,13 @@ blockquote {
   }
 
   .access-notice,
-  .access-form {
+  .access-form,
+  .ai-settings-grid {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ai-settings-head {
+    display: grid;
   }
 
   .topbar-center {

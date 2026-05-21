@@ -4,6 +4,8 @@ import {
   api,
   hasAccessToken,
   setAccessToken,
+  type AiKeyMode,
+  type AiProviderConfigResponse,
   type DraftDocument,
   type ExportFormat,
   type ExportResponse,
@@ -58,7 +60,16 @@ type PreviewPage = {
   sections: ResumeSection[]
 }
 
+type AiProviderForm = {
+  provider: string
+  baseUrl: string
+  model: string
+  apiKey: string
+  rememberInBrowser: boolean
+}
+
 const minimumResumeChars = 40
+const AI_PROVIDER_STORAGE_KEY = 'ai-cv-user-ai-provider'
 
 const sampleResume = [
   '张明',
@@ -132,6 +143,14 @@ const emptyWorkExperience: NewWorkExperience = {
   rawText: '',
 }
 
+const defaultAiProviderForm: AiProviderForm = {
+  provider: 'openai_compatible',
+  baseUrl: '',
+  model: 'gpt-5.5',
+  apiKey: '',
+  rememberInBrowser: false,
+}
+
 const experienceFieldLabel: Record<ExperienceFieldKey, string> = {
   companyName: '公司名',
   positionTitle: '职位',
@@ -157,6 +176,9 @@ function App() {
   const [draftDocument, setDraftDocument] = useState<DraftDocument | null>(null)
   const [warnings, setWarnings] = useState<string[]>([])
   const [suggestions, setSuggestions] = useState<Suggestion[]>([])
+  const [aiSettingsOpen, setAiSettingsOpen] = useState(false)
+  const [aiProviderForm, setAiProviderForm] = useState<AiProviderForm>(() => loadStoredAiProviderForm())
+  const [aiProviderConfig, setAiProviderConfig] = useState<AiProviderConfigResponse | null>(null)
   const [resumeProfile, setResumeProfile] = useState<ResumeProfile>(emptyResumeProfile)
   const [newWorkExperience, setNewWorkExperience] = useState<NewWorkExperience>(emptyWorkExperience)
   const [insertProposal, setInsertProposal] = useState<InsertProposal | null>(null)
@@ -184,12 +206,77 @@ function App() {
   const activeSuggestions = suggestions.filter((suggestion) => suggestion.status === 'open')
   const appliedSuggestions = suggestions.filter((suggestion) => suggestion.status === 'applied')
   const canUseBackend = health?.ok === true
-  const aiAnalysisUnavailable = canUseBackend && isAiAnalysisUnavailable(health)
+  const hasUserAiKey = aiProviderConfig?.keyStatus === 'configured'
+  const aiAnalysisUnavailable = canUseBackend && isAiAnalysisUnavailable(health, hasUserAiKey)
+  const aiKeyMode = resolveAiKeyMode(health, hasUserAiKey)
 
   function saveAccessToken() {
     setAccessToken(accessTokenInput)
     setNeedsAccessToken(!accessTokenInput.trim())
     setError(null)
+  }
+
+  async function ensureSession(): Promise<string> {
+    if (sessionId) return sessionId
+    const response = await api.createSession({ locale: 'zh', targetLanguage: 'zh' })
+    setSessionId(response.session.sessionId)
+    return response.session.sessionId
+  }
+
+  async function saveAiProviderConfig() {
+    const validation = validateAiProviderForm(aiProviderForm)
+    if (!validation.valid) {
+      setError({ title: '模型 key 配置不完整', details: `请补充：${validation.missing.join('、')}。` })
+      setAiSettingsOpen(true)
+      return
+    }
+
+    setError(null)
+    try {
+      const activeSessionId = await ensureSession()
+      const response = await api.configureAiProvider(activeSessionId, {
+        provider: aiProviderForm.provider.trim() || undefined,
+        baseUrl: aiProviderForm.baseUrl.trim(),
+        model: aiProviderForm.model.trim() || undefined,
+        apiKey: aiProviderForm.apiKey.trim(),
+        rememberInBrowser: aiProviderForm.rememberInBrowser,
+        disableResponseStorage: true,
+      })
+      setAiProviderConfig(response)
+      if (aiProviderForm.rememberInBrowser) {
+        saveStoredAiProviderForm(aiProviderForm)
+      } else {
+        clearStoredAiProviderForm()
+        setAiProviderForm((current) => ({ ...current, apiKey: '', rememberInBrowser: false }))
+      }
+      setAiSettingsOpen(false)
+      setError(null)
+    } catch (caught) {
+      if (isUnauthorizedError(caught)) setNeedsAccessToken(true)
+      setError(normalizeError(caught, '模型 key 保存失败'))
+      setAiSettingsOpen(true)
+    }
+  }
+
+  async function clearAiProviderConfig() {
+    setError(null)
+    clearStoredAiProviderForm()
+    setAiProviderForm(defaultAiProviderForm)
+    if (!sessionId) {
+      setAiProviderConfig(null)
+      return
+    }
+    try {
+      await api.clearAiProvider(sessionId)
+      setAiProviderConfig(null)
+    } catch (caught) {
+      if (isUnauthorizedError(caught)) setNeedsAccessToken(true)
+      setError(normalizeError(caught, '模型 key 清除失败'))
+    }
+  }
+
+  function updateAiProviderForm(field: keyof AiProviderForm, value: string | boolean) {
+    setAiProviderForm((current) => ({ ...current, [field]: value }))
   }
 
   function replaceDraftDocument(nextDraft: DraftDocument, keepHistory = true) {
@@ -241,9 +328,10 @@ function App() {
   async function analyzeResume() {
     const activeDraft = draftDocument ?? await parseDraftFromText()
     if (!activeDraft) return
-    if (isAiAnalysisUnavailable(health)) {
+    if (isAiAnalysisUnavailable(health, hasUserAiKey)) {
       setStatus('failed')
       setError(aiProviderNotConfiguredError('AI 分析暂时不可用'))
+      setAiSettingsOpen(true)
       return
     }
 
@@ -252,6 +340,7 @@ function App() {
     try {
       const response = await api.analyzeResume({
         sessionId: activeDraft.sessionId,
+        aiKeyMode,
         draftDocument: activeDraft,
         analysisGoal: 'improve_clarity',
       })
@@ -269,9 +358,10 @@ function App() {
       setError({ title: '还没有简历草稿', details: '请先粘贴或上传简历，解析成可编辑草稿。' })
       return
     }
-    if (isAiAnalysisUnavailable(health)) {
+    if (isAiAnalysisUnavailable(health, hasUserAiKey)) {
       setStatus('failed')
       setError(aiProviderNotConfiguredError('新增经历暂时不能自动插入'))
+      setAiSettingsOpen(true)
       return
     }
 
@@ -672,6 +762,9 @@ function App() {
           <button className="button secondary" onClick={() => fileInputRef.current?.click()} type="button">
             上传
           </button>
+          <button className="button secondary" onClick={() => setAiSettingsOpen((current) => !current)} type="button">
+            模型设置
+          </button>
           <button className="button primary" disabled={!canUseBackend || status === 'analyzing'} onClick={analyzeResume} type="button">
             {draftDocument ? '分析建议' : '解析并分析'}
           </button>
@@ -691,8 +784,21 @@ function App() {
       {aiAnalysisUnavailable && (
         <section className="notice compact ai-provider-notice">
           <strong>真实 AI 分析不可用</strong>
-          <p>{health?.aiAnalysisRequired ? '后端验收模式要求真实 AI provider，但当前不可用。' : '后端当前没有可用的 AI 分析能力。'}前端不会用本地规则冒充 AI 建议；当前编辑内容和预览仍可继续保留。</p>
+          <p>{health?.aiAnalysisRequired ? '后端验收模式要求真实 AI provider，但当前不可用。' : '后端当前没有默认模型 key。'}你可以打开模型设置填写自己的 key；前端不会用本地规则冒充 AI 建议。</p>
         </section>
+      )}
+
+      {(aiSettingsOpen || aiAnalysisUnavailable || aiProviderConfig) && (
+        <AiProviderPanel
+          config={aiProviderConfig}
+          form={aiProviderForm}
+          hasDefaultProvider={health?.aiProviderConfigured === true}
+          isOpen={aiSettingsOpen || aiAnalysisUnavailable}
+          onClear={() => void clearAiProviderConfig()}
+          onSave={() => void saveAiProviderConfig()}
+          onToggle={() => setAiSettingsOpen((current) => !current)}
+          onUpdate={updateAiProviderForm}
+        />
       )}
 
       {needsAccessToken && (
@@ -919,6 +1025,75 @@ function ImportPanel({
         </div>
       </div>
     </div>
+  )
+}
+
+function AiProviderPanel({
+  config,
+  form,
+  hasDefaultProvider,
+  isOpen,
+  onClear,
+  onSave,
+  onToggle,
+  onUpdate,
+}: {
+  config: AiProviderConfigResponse | null
+  form: AiProviderForm
+  hasDefaultProvider: boolean
+  isOpen: boolean
+  onClear: () => void
+  onSave: () => void
+  onToggle: () => void
+  onUpdate: (field: keyof AiProviderForm, value: string | boolean) => void
+}) {
+  return (
+    <section className={isOpen ? 'notice ai-settings-panel open' : 'notice ai-settings-panel'}>
+      <div className="ai-settings-head">
+        <div>
+          <strong>{config ? `已配置：${config.apiKeyMask}` : hasDefaultProvider ? '使用默认模型' : '需要模型 key'}</strong>
+          <p>key 仅用于本次 AI 分析和简历编辑请求，不会写入导出文件。</p>
+        </div>
+        <button className="button secondary small" onClick={onToggle} type="button">
+          {isOpen ? '收起' : '模型设置'}
+        </button>
+      </div>
+
+      {isOpen && (
+        <div className="ai-settings-body">
+          <div className="ai-settings-grid">
+            <label>
+              <span>provider</span>
+              <input value={form.provider} onChange={(event) => onUpdate('provider', event.target.value)} placeholder="openai_compatible" />
+            </label>
+            <label>
+              <span>base URL</span>
+              <input value={form.baseUrl} onChange={(event) => onUpdate('baseUrl', event.target.value)} placeholder="https://api.example.com/v1" />
+            </label>
+            <label>
+              <span>model</span>
+              <input value={form.model} onChange={(event) => onUpdate('model', event.target.value)} placeholder="gpt-5.5" />
+            </label>
+            <label>
+              <span>API key</span>
+              <input autoComplete="off" value={form.apiKey} onChange={(event) => onUpdate('apiKey', event.target.value)} placeholder="sk-..." type="password" />
+            </label>
+          </div>
+          <label className="remember-key-control">
+            <input checked={form.rememberInBrowser} type="checkbox" onChange={(event) => onUpdate('rememberInBrowser', event.target.checked)} />
+            <span>记住 key，仅保存在当前浏览器本地。默认关闭，公共电脑不要勾选。</span>
+          </label>
+          <div className="ai-settings-actions">
+            <button className="button primary" disabled={!form.baseUrl.trim() || !form.apiKey.trim()} onClick={onSave} type="button">
+              保存本次会话
+            </button>
+            <button className="button secondary" disabled={!config && !form.apiKey.trim()} onClick={onClear} type="button">
+              清除当前 key
+            </button>
+          </div>
+        </div>
+      )}
+    </section>
   )
 }
 
@@ -1646,14 +1821,54 @@ function normalizeError(caught: unknown, fallbackTitle: string): AppError {
 function aiProviderNotConfiguredError(title: string): AppError {
   return {
     title,
-    details: '后端还没有配置真实 AI provider。为避免把本地规则或固定模板冒充 AI 结果，前端已停止本次操作；你的编辑内容已保留。',
+    details: '后端还没有可用的真实 AI provider。请在“模型设置”中填写自己的模型 key，或配置后端默认 key；你的编辑内容已保留。',
   }
 }
 
-function isAiAnalysisUnavailable(health: HealthResponse | null) {
+function isAiAnalysisUnavailable(health: HealthResponse | null, hasUserAiKey: boolean) {
   if (!health) return false
+  if (hasUserAiKey) return false
   if (health.aiAnalysisAvailable === false) return true
   return health.aiProviderConfigured === false
+}
+
+function resolveAiKeyMode(health: HealthResponse | null, hasUserAiKey: boolean): AiKeyMode | undefined {
+  if (hasUserAiKey) return 'user_session_key'
+  if (health?.aiProviderConfigured) return 'owner_default'
+  return undefined
+}
+
+function validateAiProviderForm(input: AiProviderForm) {
+  const missing: string[] = []
+  if (!input.baseUrl.trim()) missing.push('base URL')
+  if (!input.apiKey.trim()) missing.push('API key')
+  return { valid: missing.length === 0, missing }
+}
+
+function loadStoredAiProviderForm(): AiProviderForm {
+  if (typeof window === 'undefined') return defaultAiProviderForm
+  try {
+    const raw = window.localStorage.getItem(AI_PROVIDER_STORAGE_KEY)
+    if (!raw) return defaultAiProviderForm
+    const parsed = JSON.parse(raw) as Partial<AiProviderForm>
+    return {
+      provider: parsed.provider || defaultAiProviderForm.provider,
+      baseUrl: parsed.baseUrl || defaultAiProviderForm.baseUrl,
+      model: parsed.model || defaultAiProviderForm.model,
+      apiKey: parsed.apiKey || defaultAiProviderForm.apiKey,
+      rememberInBrowser: true,
+    }
+  } catch {
+    return defaultAiProviderForm
+  }
+}
+
+function saveStoredAiProviderForm(input: AiProviderForm) {
+  window.localStorage.setItem(AI_PROVIDER_STORAGE_KEY, JSON.stringify(input))
+}
+
+function clearStoredAiProviderForm() {
+  window.localStorage.removeItem(AI_PROVIDER_STORAGE_KEY)
 }
 
 function isSafeSuggestionRewrite(rewrite: string | null | undefined) {

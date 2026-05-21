@@ -21,6 +21,7 @@ export type SuggestionStatus = 'open' | 'applied' | 'ignored' | 'edited_by_user'
 export type SuggestionSource = 'ai_provider' | 'local_development_fallback'
 export type InsertPosition = 'end'
 export type InsertProposalStatus = 'proposed' | 'accepted' | 'edited' | 'rejected' | 'blocked'
+export type AiKeyMode = 'owner_default' | 'user_session_key' | 'not_configured'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:4000'
 const ACCESS_TOKEN_STORAGE_KEY = 'ai-cv-access-token'
@@ -70,6 +71,7 @@ export type HealthResponse = {
   version: string
   maxRequestBytes: number
   aiProviderConfigured: boolean
+  userAiKeySupported?: boolean
   aiAnalysisRequired?: boolean
   aiAnalysisAvailable?: boolean
   accessControlRequired?: boolean
@@ -395,6 +397,33 @@ export type NewWorkExperience = {
   rawText: string
 }
 
+export type AiProviderConfigInput = {
+  provider?: string
+  baseUrl: string
+  model?: string
+  apiKey: string
+  reasoningEffort?: string
+  disableResponseStorage?: boolean
+  requestTimeoutMs?: number
+  maxOutputTokens?: number
+  rememberInBrowser?: boolean
+}
+
+export type AiProviderConfigResponse = {
+  provider: string
+  baseUrl: string
+  model: string
+  apiKeyMask: string
+  keyStatus: 'configured' | string
+  createdAt: string
+  expiresAt: string
+  rememberInBrowser: boolean
+}
+
+export type ClearAiProviderResponse = {
+  keyStatus: 'cleared' | string
+}
+
 export type InsertExperienceResponse = {
   proposal: InsertProposal
 }
@@ -456,6 +485,7 @@ export const api = {
     }),
   analyzeResume: (body: {
     sessionId: string
+    aiKeyMode?: AiKeyMode
     draftDocument: DraftDocument
     analysisGoal?: string
   }) =>
@@ -472,6 +502,15 @@ export const api = {
     request<InsertExperienceResponse>('/api/resumes/insert-experience', {
       method: 'POST',
       body: JSON.stringify(body),
+    }),
+  configureAiProvider: (sessionId: string, body: AiProviderConfigInput) =>
+    request<AiProviderConfigResponse>(`/api/sessions/${sessionId}/ai-provider`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  clearAiProvider: (sessionId: string) =>
+    request<ClearAiProviderResponse>(`/api/sessions/${sessionId}/ai-provider`, {
+      method: 'DELETE',
     }),
   profileIntake: (body: {
     sessionId?: string
