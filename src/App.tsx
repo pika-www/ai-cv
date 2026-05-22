@@ -4,9 +4,12 @@ import {
   api,
   hasAccessToken,
   setAccessToken,
+  type AiCapabilityStatus,
   type AiKeyMode,
-  type AiWireApi,
+  type AiProviderCapabilityResponse,
   type AiProviderConfigResponse,
+  type AiResponseFormat,
+  type AiWireApi,
   type DraftDocument,
   type ExportFormat,
   type ExportResponse,
@@ -26,7 +29,10 @@ type WorkflowStatus =
   | 'idle'
   | 'uploading'
   | 'parsing'
+  | 'parse_failed'
   | 'editing'
+  | 'model_checking'
+  | 'model_unsupported'
   | 'analyzing'
   | 'inserting'
   | 'ready_to_export'
@@ -71,6 +77,7 @@ type AiProviderForm = {
   baseUrl: string
   model: string
   wireApi: AiWireApi
+  responseFormat: AiResponseFormat
   apiKey: string
   rememberInBrowser: boolean
 }
@@ -101,7 +108,10 @@ const statusLabel: Record<WorkflowStatus, string> = {
   idle: '未开始',
   uploading: '读取文件中',
   parsing: '解析中',
+  parse_failed: '解析失败',
   editing: '编辑中',
+  model_checking: '检测模型',
+  model_unsupported: '模型不支持',
   analyzing: '分析中',
   inserting: '插入中',
   ready_to_export: '可导出',
@@ -155,6 +165,7 @@ const defaultAiProviderForm: AiProviderForm = {
   baseUrl: '',
   model: 'gpt-5.5',
   wireApi: 'responses',
+  responseFormat: 'auto',
   apiKey: '',
   rememberInBrowser: false,
 }
@@ -188,6 +199,7 @@ function App() {
   const [aiSettingsOpen, setAiSettingsOpen] = useState(false)
   const [aiProviderForm, setAiProviderForm] = useState<AiProviderForm>(() => loadStoredAiProviderForm())
   const [aiProviderConfig, setAiProviderConfig] = useState<AiProviderConfigResponse | null>(null)
+  const [aiCapability, setAiCapability] = useState<AiProviderCapabilityResponse | null>(null)
   const [resumeProfile, setResumeProfile] = useState<ResumeProfile>(emptyResumeProfile)
   const [newWorkExperience, setNewWorkExperience] = useState<NewWorkExperience>(emptyWorkExperience)
   const [insertProposal, setInsertProposal] = useState<InsertProposal | null>(null)
@@ -218,6 +230,9 @@ function App() {
   const hasUserAiKey = aiProviderConfig?.keyStatus === 'configured'
   const aiAnalysisUnavailable = canUseBackend && isAiAnalysisUnavailable(health, hasUserAiKey)
   const aiKeyMode = resolveAiKeyMode(health, hasUserAiKey)
+  const modelCapability = getModelCapability(aiProviderConfig, aiCapability, hasUserAiKey)
+  const modelCapabilityBlocker = getModelCapabilityBlocker(modelCapability, hasUserAiKey)
+  const shouldRequireManualSuggestionApply = modelCapability === 'basic'
 
   function saveAccessToken() {
     setAccessToken(accessTokenInput)
@@ -248,23 +263,68 @@ function App() {
         baseUrl: aiProviderForm.baseUrl.trim(),
         model: aiProviderForm.model.trim() || undefined,
         wireApi: aiProviderForm.wireApi,
+        responseFormat: aiProviderForm.responseFormat,
         apiKey: aiProviderForm.apiKey.trim(),
         rememberInBrowser: aiProviderForm.rememberInBrowser,
         disableResponseStorage: true,
       })
       setAiProviderConfig(response)
+      setAiCapability(null)
       if (aiProviderForm.rememberInBrowser) {
         saveStoredAiProviderForm(aiProviderForm)
       } else {
         clearStoredAiProviderForm()
         setAiProviderForm((current) => ({ ...current, apiKey: '', rememberInBrowser: false }))
       }
-      setAiSettingsOpen(false)
       setError(null)
+      await checkAiProviderCapability(activeSessionId, response)
     } catch (caught) {
       if (isUnauthorizedError(caught)) setNeedsAccessToken(true)
       setError(normalizeError(caught, '模型 key 保存失败'))
       setAiSettingsOpen(true)
+    }
+  }
+
+  async function checkAiProviderCapability(activeSessionId = sessionId, config = aiProviderConfig) {
+    if (!activeSessionId || !config) {
+      setError({ title: '还没有可检测的模型 key', details: '请先保存本次会话的模型 key，再检测模型能力。' })
+      setAiSettingsOpen(true)
+      return null
+    }
+
+    setError(null)
+    setStatus('model_checking')
+    try {
+      const response = await api.checkAiProviderCapability(activeSessionId, {
+        aiKeyMode: 'user_session_key',
+        sampleLanguage: 'zh',
+      })
+      setAiCapability(response)
+      setAiProviderConfig({
+        ...config,
+        capabilityStatus: response.capabilityStatus,
+        capabilityCheckedAt: response.checkedAt,
+        wireApi: response.wireApi,
+        responseFormat: response.responseFormat,
+      })
+      if (response.capabilityStatus === 'unsupported') {
+        setStatus('model_unsupported')
+        setError({
+          title: '当前模型不支持简历分析',
+          details: localizeBackendText(response.blockedReason) || '当前模型无法返回结构化建议，请更换支持文本生成和 JSON 输出的模型，或改用默认模型。',
+        })
+        setAiSettingsOpen(true)
+        return response
+      }
+      setStatus(draftDocument ? 'editing' : 'idle')
+      setAiSettingsOpen(false)
+      return response
+    } catch (caught) {
+      if (isUnauthorizedError(caught)) setNeedsAccessToken(true)
+      setStatus(draftDocument ? 'editing' : 'failed')
+      setError(normalizeError(caught, '模型能力检测失败'))
+      setAiSettingsOpen(true)
+      return null
     }
   }
 
@@ -274,11 +334,13 @@ function App() {
     setAiProviderForm(defaultAiProviderForm)
     if (!sessionId) {
       setAiProviderConfig(null)
+      setAiCapability(null)
       return
     }
     try {
       await api.clearAiProvider(sessionId)
       setAiProviderConfig(null)
+      setAiCapability(null)
     } catch (caught) {
       if (isUnauthorizedError(caught)) setNeedsAccessToken(true)
       setError(normalizeError(caught, '模型 key 清除失败'))
@@ -287,6 +349,10 @@ function App() {
 
   function updateAiProviderForm(field: keyof AiProviderForm, value: string | boolean) {
     setAiProviderForm((current) => ({ ...current, [field]: value }))
+    if (field === 'provider' || field === 'baseUrl' || field === 'model' || field === 'wireApi' || field === 'responseFormat' || field === 'apiKey') {
+      setAiCapability(null)
+      setAiProviderConfig((current) => current ? { ...current, capabilityStatus: 'unknown', capabilityCheckedAt: null } : current)
+    }
   }
 
   function replaceDraftDocument(nextDraft: DraftDocument, keepHistory = true) {
@@ -304,6 +370,7 @@ function App() {
     const text = resumeText.trim()
     if (text.length < minimumResumeChars) {
       setError(emptyResumeError())
+      setStatus('parse_failed')
       return null
     }
 
@@ -322,14 +389,18 @@ function App() {
       setDraftHistory([])
       replaceDraftDocument(response.draftDocument, false)
       setResumeProfile((current) => mergeProfileFromDraft(current, response.draftDocument, fileName, text))
-      setWarnings(localizeBackendTexts(response.warnings))
+      setWarnings(localizeBackendTexts([
+        ...response.warnings,
+        ...(response.parseStatus ? [`解析状态：${response.parseStatus}`] : []),
+        ...(response.fallbackAction ? [`后续处理：${response.fallbackAction}`] : []),
+      ]))
       setSuggestions([])
       setInsertProposal(null)
       setStatus('editing')
       return response.draftDocument
     } catch (caught) {
       if (isUnauthorizedError(caught)) setNeedsAccessToken(true)
-      setStatus('failed')
+      setStatus('parse_failed')
       setError(normalizeError(caught, '简历解析失败'))
       return null
     }
@@ -341,6 +412,12 @@ function App() {
     if (isAiAnalysisUnavailable(health, hasUserAiKey)) {
       setStatus('failed')
       setError(aiProviderNotConfiguredError('AI 分析暂时不可用'))
+      setAiSettingsOpen(true)
+      return
+    }
+    if (modelCapabilityBlocker) {
+      setStatus(modelCapability === 'unsupported' ? 'model_unsupported' : 'failed')
+      setError(modelCapabilityBlocker)
       setAiSettingsOpen(true)
       return
     }
@@ -387,6 +464,12 @@ function App() {
     if (isAiAnalysisUnavailable(health, hasUserAiKey)) {
       setStatus('failed')
       setError(aiProviderNotConfiguredError('新增经历暂时不能自动插入'))
+      setAiSettingsOpen(true)
+      return
+    }
+    if (modelCapabilityBlocker) {
+      setStatus(modelCapability === 'unsupported' ? 'model_unsupported' : 'failed')
+      setError(modelCapabilityBlocker)
       setAiSettingsOpen(true)
       return
     }
@@ -539,7 +622,7 @@ function App() {
   function applySuggestion(suggestion: Suggestion) {
     if (!draftDocument) return
 
-    const blocker = getSuggestionApplyBlocker(suggestion)
+    const blocker = getSuggestionApplyBlocker(suggestion, shouldRequireManualSuggestionApply)
     if (blocker) {
       setError({
         title: '这条建议不能直接应用',
@@ -587,6 +670,14 @@ function App() {
     setSuggestions((current) => current.map((item) => (
       item.suggestionId === suggestionId ? { ...item, status: 'ignored' } : item
     )))
+  }
+
+  async function copySuggestionRewrite(suggestion: Suggestion) {
+    if (!suggestion.exampleRewrite?.trim()) {
+      setError({ title: '没有可复制的改写文本', details: '这条建议没有返回可直接放进简历的成品句。' })
+      return
+    }
+    await navigator.clipboard.writeText(suggestion.exampleRewrite)
   }
 
   function confirmReviewItems() {
@@ -737,7 +828,7 @@ function App() {
           title: '文件里没有读出足够的简历正文',
           details: uploadExtractionFallbackDetails(extension),
         })
-        setStatus('failed')
+        setStatus('parse_failed')
       } else {
         setError(null)
         setStatus('idle')
@@ -747,7 +838,7 @@ function App() {
         title: '文件读取失败',
         details: caught instanceof Error ? localizeBackendText(caught.message) : '浏览器无法读取这个文件，请复制简历正文后粘贴。',
       })
-      setStatus('failed')
+      setStatus('parse_failed')
     }
   }
 
@@ -797,7 +888,7 @@ function App() {
           <button className="button secondary" onClick={() => setAiSettingsOpen((current) => !current)} type="button">
             模型设置
           </button>
-          <button className="button primary" disabled={!canUseBackend || status === 'analyzing'} onClick={analyzeResume} type="button">
+          <button className="button primary" disabled={!canUseBackend || status === 'analyzing' || status === 'model_checking'} onClick={analyzeResume} type="button">
             {draftDocument ? '分析建议' : '解析并分析'}
           </button>
           <button className="button secondary" disabled={!draftDocument} onClick={() => void exportResume('pdf')} type="button">
@@ -823,14 +914,24 @@ function App() {
       {(aiSettingsOpen || aiAnalysisUnavailable || aiProviderConfig) && (
         <AiProviderPanel
           config={aiProviderConfig}
+          capability={aiCapability}
           form={aiProviderForm}
           hasDefaultProvider={health?.aiProviderConfigured === true}
           isOpen={aiSettingsOpen || aiAnalysisUnavailable}
+          isChecking={status === 'model_checking'}
           onClear={() => void clearAiProviderConfig()}
+          onCheck={() => void checkAiProviderCapability()}
           onSave={() => void saveAiProviderConfig()}
           onToggle={() => setAiSettingsOpen((current) => !current)}
           onUpdate={updateAiProviderForm}
         />
+      )}
+
+      {hasUserAiKey && modelCapability && modelCapability !== 'full' && (
+        <section className={modelCapability === 'basic' ? 'notice compact capability-notice basic' : 'notice compact capability-notice blocked'}>
+          <strong>{capabilityStatusLabel(modelCapability)}</strong>
+          <p>{capabilityStatusDescription(modelCapability, aiCapability?.blockedReason)}</p>
+        </section>
       )}
 
       {needsAccessToken && (
@@ -924,7 +1025,7 @@ function App() {
           <section className="panel add-panel">
             <PanelHeader eyebrow="Add experience" title="新增工作经历" meta="Structured input" />
             <WorkExperienceForm
-              disabled={status === 'inserting'}
+              disabled={status === 'inserting' || Boolean(modelCapabilityBlocker)}
               value={newWorkExperience}
               onSubmit={insertExperience}
               onUpdate={updateWorkExperience}
@@ -936,7 +1037,9 @@ function App() {
           <section className="panel insight-panel">
             <PanelHeader eyebrow="AI suggestions" title="优化建议" meta={`${activeSuggestions.length} open`} />
             <SuggestionList
+              manualApplyRequired={shouldRequireManualSuggestionApply}
               onApply={applySuggestion}
+              onCopy={copySuggestionRewrite}
               onIgnore={ignoreSuggestion}
               suggestions={activeSuggestions}
             />
@@ -1068,24 +1171,32 @@ function ImportPanel({
 }
 
 function AiProviderPanel({
+  capability,
   config,
   form,
   hasDefaultProvider,
+  isChecking,
   isOpen,
   onClear,
+  onCheck,
   onSave,
   onToggle,
   onUpdate,
 }: {
+  capability: AiProviderCapabilityResponse | null
   config: AiProviderConfigResponse | null
   form: AiProviderForm
   hasDefaultProvider: boolean
+  isChecking: boolean
   isOpen: boolean
   onClear: () => void
+  onCheck: () => void
   onSave: () => void
   onToggle: () => void
   onUpdate: (field: keyof AiProviderForm, value: string | boolean) => void
 }) {
+  const capabilityStatus = getModelCapability(config, capability, Boolean(config))
+
   return (
     <section className={isOpen ? 'notice ai-settings-panel open' : 'notice ai-settings-panel'}>
       <div className="ai-settings-head">
@@ -1097,6 +1208,16 @@ function AiProviderPanel({
           {isOpen ? '收起' : '模型设置'}
         </button>
       </div>
+
+      {config && (
+        <div className={`capability-card ${capabilityStatus}`}>
+          <div>
+            <strong>{capabilityStatusLabel(capabilityStatus)}</strong>
+            <p>{capabilityStatusDescription(capabilityStatus, capability?.blockedReason)}</p>
+          </div>
+          <span>{capability?.checkedAt ?? config.capabilityCheckedAt ?? '未检测'}</span>
+        </div>
+      )}
 
       {isOpen && (
         <div className="ai-settings-body">
@@ -1121,6 +1242,15 @@ function AiProviderPanel({
               </select>
             </label>
             <label>
+              <span>response format</span>
+              <select value={form.responseFormat} onChange={(event) => onUpdate('responseFormat', event.target.value)}>
+                <option value="auto">Auto</option>
+                <option value="json_schema">JSON Schema</option>
+                <option value="json_object">JSON Object</option>
+                <option value="plain_json">Plain JSON</option>
+              </select>
+            </label>
+            <label>
               <span>API key</span>
               <input autoComplete="off" value={form.apiKey} onChange={(event) => onUpdate('apiKey', event.target.value)} placeholder="sk-..." type="password" />
             </label>
@@ -1131,7 +1261,10 @@ function AiProviderPanel({
           </label>
           <div className="ai-settings-actions">
             <button className="button primary" disabled={!form.baseUrl.trim() || !form.apiKey.trim()} onClick={onSave} type="button">
-              保存本次会话
+              {isChecking ? '检测中' : '保存并检测'}
+            </button>
+            <button className="button secondary" disabled={!config || isChecking} onClick={onCheck} type="button">
+              检测模型能力
             </button>
             <button className="button secondary" disabled={!config && !form.apiKey.trim()} onClick={onClear} type="button">
               清除当前 key
@@ -1500,11 +1633,15 @@ function ResumePaperHeader({
 }
 
 function SuggestionList({
+  manualApplyRequired,
   onApply,
+  onCopy,
   onIgnore,
   suggestions,
 }: {
+  manualApplyRequired: boolean
   onApply: (suggestion: Suggestion) => void
+  onCopy: (suggestion: Suggestion) => void
   onIgnore: (suggestionId: string) => void
   suggestions: Suggestion[]
 }) {
@@ -1521,7 +1658,7 @@ function SuggestionList({
   return (
     <div className="suggestion-list">
       {suggestions.map((suggestion) => {
-        const applyBlocker = getSuggestionApplyBlocker(suggestion)
+        const applyBlocker = getSuggestionApplyBlocker(suggestion, manualApplyRequired)
         return (
           <article className={`suggestion-card ${suggestion.riskLevel}`} key={suggestion.suggestionId}>
             <div className="suggestion-head">
@@ -1542,6 +1679,11 @@ function SuggestionList({
               <button className="button primary small" disabled={Boolean(applyBlocker)} onClick={() => onApply(suggestion)} type="button">
                 应用
               </button>
+              {manualApplyRequired && (
+                <button className="button secondary small" disabled={!suggestion.exampleRewrite?.trim()} onClick={() => void onCopy(suggestion)} type="button">
+                  复制改写
+                </button>
+              )}
               <button className="button secondary small" onClick={() => onIgnore(suggestion.suggestionId)} type="button">
                 忽略
               </button>
@@ -1957,6 +2099,52 @@ function aiProviderNotConfiguredError(title: string): AppError {
   }
 }
 
+function getModelCapability(
+  config: AiProviderConfigResponse | null,
+  capability: AiProviderCapabilityResponse | null,
+  hasUserAiKey: boolean,
+): AiCapabilityStatus {
+  if (!hasUserAiKey) return 'full'
+  return normalizeCapabilityStatus(capability?.capabilityStatus ?? config?.capabilityStatus)
+}
+
+function normalizeCapabilityStatus(value: string | null | undefined): AiCapabilityStatus {
+  if (value === 'full' || value === 'basic' || value === 'unsupported') return value
+  return 'unknown'
+}
+
+function getModelCapabilityBlocker(capability: AiCapabilityStatus, hasUserAiKey: boolean): AppError | null {
+  if (!hasUserAiKey) return null
+  if (capability === 'full' || capability === 'basic') return null
+  if (capability === 'unsupported') {
+    return {
+      title: '当前模型不支持简历分析',
+      details: '当前模型无法返回结构化建议，请更换支持文本生成和 JSON 输出的模型，或清除用户 key 后改用默认模型。已解析草稿不会丢失。',
+    }
+  }
+  return {
+    title: '需要先检测模型能力',
+    details: '用户模型 key 已保存，但还没有确认它能生成结构化简历建议。请在“模型设置”里点击“检测模型能力”，通过后再分析；已解析草稿不会丢失。',
+  }
+}
+
+function capabilityStatusLabel(status: AiCapabilityStatus) {
+  const labels: Record<AiCapabilityStatus, string> = {
+    full: '完整支持简历分析',
+    basic: '基础支持，需谨慎使用',
+    unsupported: '不支持简历分析',
+    unknown: '尚未检测模型能力',
+  }
+  return labels[status]
+}
+
+function capabilityStatusDescription(status: AiCapabilityStatus, blockedReason?: string | null) {
+  if (status === 'full') return '当前模型可用于结构化简历分析、新增经历插入和一键应用建议。'
+  if (status === 'basic') return '当前模型能生成文本，但结构化建议质量可能不稳定；建议只能复制或手动编辑，不会直接写入简历。'
+  if (status === 'unsupported') return localizeBackendText(blockedReason) || '当前模型无法返回结构化建议，请更换支持文本生成和 JSON 输出的模型。'
+  return '保存用户模型 key 后需要运行一次轻量检测，通过后才能进入完整分析流程。'
+}
+
 function isAiAnalysisUnavailable(health: HealthResponse | null, hasUserAiKey: boolean) {
   if (!health) return false
   if (hasUserAiKey) return false
@@ -1988,6 +2176,7 @@ function loadStoredAiProviderForm(): AiProviderForm {
       baseUrl: parsed.baseUrl || defaultAiProviderForm.baseUrl,
       model: parsed.model || defaultAiProviderForm.model,
       wireApi: normalizeWireApi(parsed.wireApi),
+      responseFormat: normalizeResponseFormat(parsed.responseFormat),
       apiKey: parsed.apiKey || defaultAiProviderForm.apiKey,
       rememberInBrowser: true,
     }
@@ -1998,6 +2187,11 @@ function loadStoredAiProviderForm(): AiProviderForm {
 
 function normalizeWireApi(value: unknown): AiWireApi {
   return value === 'chat_completions' ? 'chat_completions' : 'responses'
+}
+
+function normalizeResponseFormat(value: unknown): AiResponseFormat {
+  if (value === 'json_schema' || value === 'json_object' || value === 'plain_json') return value
+  return 'auto'
 }
 
 function wireApiLabel(value: string) {
@@ -2029,7 +2223,8 @@ function isSafeSuggestionRewrite(rewrite: string | null | undefined) {
   return !blockedPhrases.some((phrase) => lower.includes(phrase.toLowerCase()))
 }
 
-function getSuggestionApplyBlocker(suggestion: Suggestion) {
+function getSuggestionApplyBlocker(suggestion: Suggestion, manualApplyRequired = false) {
+  if (manualApplyRequired) return '当前模型只通过基础能力检测，不能一键应用建议。请复制改写后手动确认并编辑。'
   if (!suggestion.targetItemId) return '这条建议没有绑定到具体简历条目，需要手动编辑对应内容。'
   if (!suggestion.exampleRewrite?.trim()) return '这条建议没有可直接写入简历的改写文本。'
   if (!isSafeSuggestionRewrite(suggestion.exampleRewrite)) return '建议改写里仍包含提示语，需要先手动改成可以直接进入简历的成品句。'

@@ -23,6 +23,8 @@ export type InsertPosition = 'end'
 export type InsertProposalStatus = 'proposed' | 'accepted' | 'edited' | 'rejected' | 'blocked'
 export type AiKeyMode = 'owner_default' | 'user_session_key' | 'not_configured'
 export type AiWireApi = 'responses' | 'chat_completions'
+export type AiResponseFormat = 'auto' | 'json_schema' | 'json_object' | 'plain_json'
+export type AiCapabilityStatus = 'full' | 'basic' | 'unsupported' | 'unknown'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:4000'
 const ACCESS_TOKEN_STORAGE_KEY = 'ai-cv-access-token'
@@ -335,6 +337,8 @@ export type ParseResumeResponse = {
   draftDocument: DraftDocument
   sections: ResumeSection[]
   warnings: string[]
+  parseStatus?: string
+  fallbackAction?: string
   profile: Profile
   evidenceItems: EvidenceItem[]
   nextQuestions: FollowUpQuestion[]
@@ -418,6 +422,7 @@ export type AiProviderConfigInput = {
   baseUrl: string
   model?: string
   wireApi?: AiWireApi
+  responseFormat?: AiResponseFormat
   apiKey: string
   reasoningEffort?: string
   disableResponseStorage?: boolean
@@ -431,8 +436,11 @@ export type AiProviderConfigResponse = {
   baseUrl: string
   model: string
   wireApi?: AiWireApi | string
+  responseFormat?: AiResponseFormat | string
   apiKeyMask: string
   keyStatus: 'configured' | string
+  capabilityStatus?: AiCapabilityStatus | string
+  capabilityCheckedAt?: string | null
   createdAt: string
   expiresAt: string
   rememberInBrowser: boolean
@@ -440,6 +448,28 @@ export type AiProviderConfigResponse = {
 
 export type ClearAiProviderResponse = {
   keyStatus: 'cleared' | string
+}
+
+export type AiProviderCapabilities = {
+  textGeneration: boolean
+  jsonOutput: boolean
+  resumeSuggestion: boolean
+  zhResumeUnderstanding: boolean
+  contextLengthEnough: boolean
+}
+
+export type AiProviderCapabilityResponse = {
+  sessionId: string
+  aiKeyMode: AiKeyMode
+  provider: string
+  model: string
+  wireApi: AiWireApi | string
+  responseFormat: AiResponseFormat | string
+  capabilityStatus: AiCapabilityStatus | string
+  capabilities: AiProviderCapabilities
+  warnings: string[]
+  blockedReason?: string | null
+  checkedAt: string
 }
 
 export type InsertExperienceResponse = {
@@ -607,6 +637,14 @@ export const api = {
     }),
   configureAiProvider: (sessionId: string, body: AiProviderConfigInput) =>
     request<AiProviderConfigResponse>(`/api/sessions/${sessionId}/ai-provider`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  checkAiProviderCapability: (sessionId: string, body: {
+    aiKeyMode?: AiKeyMode
+    sampleLanguage?: Locale
+  }) =>
+    request<AiProviderCapabilityResponse>(`/api/sessions/${sessionId}/ai-provider/check`, {
       method: 'POST',
       body: JSON.stringify(body),
     }),

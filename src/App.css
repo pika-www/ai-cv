@@ -315,6 +315,16 @@ label.button {
   color: var(--brand-pine);
 }
 
+.capability-notice.basic {
+  border-color: rgba(201, 130, 29, 0.28);
+  background: rgba(240, 184, 58, 0.12);
+}
+
+.capability-notice.blocked {
+  border-color: rgba(221, 95, 58, 0.32);
+  background: rgba(221, 95, 58, 0.08);
+}
+
 .ai-settings-panel {
   border-color: rgba(47, 95, 143, 0.26);
   background: rgba(47, 95, 143, 0.06);
@@ -329,6 +339,52 @@ label.button {
 
 .ai-settings-panel p {
   color: var(--muted);
+}
+
+.capability-card {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-gap);
+  align-items: flex-start;
+  margin-top: var(--space-gap);
+  padding: 12px;
+  border: 1px solid rgba(47, 95, 143, 0.22);
+  border-radius: var(--radius-small);
+  background: rgba(255, 253, 247, 0.58);
+}
+
+.capability-card.full {
+  border-color: rgba(63, 122, 80, 0.28);
+  background: rgba(63, 122, 80, 0.08);
+}
+
+.capability-card.basic,
+.capability-card.unknown {
+  border-color: rgba(240, 184, 58, 0.3);
+  background: rgba(240, 184, 58, 0.1);
+}
+
+.capability-card.unsupported {
+  border-color: rgba(221, 95, 58, 0.32);
+  background: rgba(221, 95, 58, 0.08);
+}
+
+.capability-card strong,
+.capability-card span {
+  display: block;
+}
+
+.capability-card p {
+  margin-top: 5px;
+}
+
+.capability-card > span {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.4;
+  text-align: right;
 }
 
 .ai-settings-body {
@@ -1291,6 +1347,14 @@ blockquote {
 
   .ai-settings-head {
     display: grid;
+  }
+
+  .capability-card {
+    display: grid;
+  }
+
+  .capability-card > span {
+    text-align: left;
   }
 
   .topbar-center {

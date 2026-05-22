@@ -53,6 +53,20 @@ const backendTextMap = new Map<string, string>([
   ['Confirm or edit AI-inserted changes before exporting this draft.', '导出前请先确认或编辑 AI 插入的改动。'],
   ['sessionId must match draftDocument.sessionId.', '会话 ID 必须与简历草稿中的会话 ID 一致。'],
   ['PDF is generated from the frontend ResumePreview HTML/CSS print flow. The backend no longer returns a separately rendered PDF because that would create a second template source.', 'PDF 已改为使用前端预览模板生成，后端不再返回另一套 PDF 模板，避免预览和导出不一致。'],
+  ['Model capability unavailable', '模型能力不可用'],
+  ['当前模型尚未完成能力检测，请先运行模型能力检测。', '当前模型尚未完成能力检测，请先运行模型能力检测。'],
+  ['当前模型无法用于简历分析，请更换模型或使用默认模型。', '当前模型无法用于简历分析，请更换模型或使用默认模型。'],
+  ['AI provider 拒绝了当前 key 或模型权限。', 'AI provider 拒绝了当前 key 或模型权限。'],
+  ['AI provider 当前限流，请稍后重试。', 'AI provider 当前限流，请稍后重试。'],
+  ['AI provider 能力检测超时，请稍后重试。', 'AI provider 能力检测超时，请稍后重试。'],
+  ['AI provider 拒绝了当前能力检测请求。', 'AI provider 拒绝了当前能力检测请求。'],
+  ['AI provider 配置无效。', 'AI provider 配置无效。'],
+  ['AI provider 暂时不可用或返回内容不可用。', 'AI provider 暂时不可用或返回内容不可用。'],
+  ['模型返回了可解析 JSON，但没有返回可用简历建议。', '模型返回了可解析 JSON，但没有返回可用简历建议。'],
+  ['模型返回内容无法解析为后端需要的 JSON。', '模型返回内容无法解析为后端需要的 JSON。'],
+  ['模型能力检测请求失败，请检查 key、base URL、模型名或稍后重试。', '模型能力检测请求失败，请检查 key、base URL、模型名或稍后重试。'],
+  ['当前模型无法返回结构化简历建议。', '当前模型无法返回结构化简历建议。'],
+  ['当前模型无法返回结构化 JSON 建议。', '当前模型无法返回结构化 JSON 建议。'],
 ])
 
 const backendTextPatterns: Array<[RegExp, (match: RegExpMatchArray) => string]> = [
