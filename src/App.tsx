@@ -17,9 +17,13 @@ import {
   type InsertProposal,
   type NewWorkExperience,
   type ResumeItem,
+  type ResumeModule,
+  type ResumeModuleStatus,
+  type ResumeModuleType,
   type ResumeSection,
   type ResumeSectionStatus,
   type RiskLevel,
+  type SuggestedOperation,
   type Suggestion,
 } from './api'
 import './App.css'
@@ -31,6 +35,10 @@ type WorkflowStatus =
   | 'parsing'
   | 'parse_failed'
   | 'editing'
+  | 'module_ready'
+  | 'module_analyzing'
+  | 'suggestion_extracting'
+  | 'suggestion_extract_failed'
   | 'model_checking'
   | 'model_unsupported'
   | 'analyzing'
@@ -110,6 +118,10 @@ const statusLabel: Record<WorkflowStatus, string> = {
   parsing: '解析中',
   parse_failed: '解析失败',
   editing: '编辑中',
+  module_ready: '模块就绪',
+  module_analyzing: '模块分析中',
+  suggestion_extracting: '提取建议中',
+  suggestion_extract_failed: '建议提取失败',
   model_checking: '检测模型',
   model_unsupported: '模型不支持',
   analyzing: '分析中',
@@ -129,6 +141,37 @@ const sectionTitle: Record<string, string> = {
   skills: '技能',
   certifications: '证书',
   additional: '其他',
+}
+
+const moduleTypeLabel: Record<string, string> = {
+  basic_info: '基本信息',
+  summary: '个人总结',
+  education: '教育经历',
+  work_experience: '工作经历',
+  project_experience: '项目经历',
+  skills: '技能',
+  certifications: '证书',
+  additional: '其他',
+  unknown: '未识别模块',
+}
+
+const moduleStatusLabel: Record<string, string> = {
+  normal: '待分析',
+  needs_review: '需确认',
+  analyzing: '分析中',
+  has_suggestions: '有建议',
+  applied: '已应用',
+  ignored: '已忽略',
+  unknown: '待确认',
+}
+
+const operationLabel: Record<SuggestedOperation, string> = {
+  rewrite_in_place: '模块内改写',
+  split_into_bullets: '拆成要点',
+  move_to_module: '建议移动',
+  split_module: '拆分模块',
+  merge_with_module: '合并模块',
+  delete_from_module: '删除内容',
 }
 
 const riskLabel: Record<RiskLevel, string> = {
@@ -207,6 +250,8 @@ function App() {
   const [browserPdfExport, setBrowserPdfExport] = useState<BrowserPdfExport | null>(null)
   const [fileName, setFileName] = useState<string | null>(null)
   const [draftHistory, setDraftHistory] = useState<DraftDocument[]>([])
+  const [selectedModuleId, setSelectedModuleId] = useState<string | null>(null)
+  const [analyzingModuleId, setAnalyzingModuleId] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
@@ -224,7 +269,13 @@ function App() {
   }, [])
 
   const draftStats = useMemo(() => getDraftStats(draftDocument), [draftDocument])
+  const resumeModules = useMemo(() => getResumeModules(draftDocument), [draftDocument])
+  const selectedModule = selectedModuleId ? resumeModules.find((module) => module.moduleId === selectedModuleId) ?? null : null
   const activeSuggestions = suggestions.filter((suggestion) => suggestion.status === 'open' || suggestion.status === 'blocked')
+  const moduleSuggestionCounts = useMemo(
+    () => getModuleSuggestionCounts(resumeModules, activeSuggestions),
+    [resumeModules, activeSuggestions],
+  )
   const appliedSuggestions = suggestions.filter((suggestion) => suggestion.status === 'applied')
   const canUseBackend = health?.ok === true
   const hasUserAiKey = aiProviderConfig?.keyStatus === 'configured'
@@ -387,8 +438,13 @@ function App() {
       })
       setSessionId(response.session.sessionId)
       setDraftHistory([])
-      replaceDraftDocument(response.draftDocument, false)
-      setResumeProfile((current) => mergeProfileFromDraft(current, response.draftDocument, fileName, text))
+      const parsedDraft = {
+        ...response.draftDocument,
+        modules: response.draftDocument.modules?.length ? response.draftDocument.modules : response.modules,
+      }
+      replaceDraftDocument(parsedDraft, false)
+      setSelectedModuleId(getResumeModules(parsedDraft)[0]?.moduleId ?? null)
+      setResumeProfile((current) => mergeProfileFromDraft(current, parsedDraft, fileName, text))
       setWarnings(localizeBackendTexts([
         ...response.warnings,
         ...(response.parseStatus ? [`解析状态：${response.parseStatus}`] : []),
@@ -396,8 +452,8 @@ function App() {
       ]))
       setSuggestions([])
       setInsertProposal(null)
-      setStatus('editing')
-      return response.draftDocument
+      setStatus(getResumeModules(parsedDraft).length > 0 ? 'module_ready' : 'editing')
+      return parsedDraft
     } catch (caught) {
       if (isUnauthorizedError(caught)) setNeedsAccessToken(true)
       setStatus('parse_failed')
@@ -406,7 +462,7 @@ function App() {
     }
   }
 
-  async function analyzeResume() {
+  async function analyzeResume(targetModule?: ResumeModule) {
     const activeDraft = draftDocument ?? await parseDraftFromText()
     if (!activeDraft) return
     if (isAiAnalysisUnavailable(health, hasUserAiKey)) {
@@ -423,14 +479,34 @@ function App() {
     }
 
     setError(null)
-    setStatus('analyzing')
-    setAnalyzeProgress({ stage: 'starting', message: '正在准备分析请求' })
+    const activeModules = getResumeModules(activeDraft)
+    const requestDraft = { ...activeDraft, modules: activeModules }
+    const requestModule = targetModule
+      ? activeModules.find((module) => module.moduleId === targetModule.moduleId) ?? null
+      : null
+    if (targetModule && !requestModule) {
+      setError({ title: '模块不存在', details: '当前模块不在最新草稿中，请重新选择模块后再分析。' })
+      return
+    }
+
+    const isModuleAnalysis = Boolean(requestModule)
+    setStatus(isModuleAnalysis ? 'module_analyzing' : 'analyzing')
+    setAnalyzingModuleId(requestModule?.moduleId ?? null)
+    setSelectedModuleId(requestModule?.moduleId ?? selectedModuleId)
+    if (requestModule) {
+      setDraftDocument((current) => current ? { ...current, modules: updateModuleStatus(getResumeModules(current), requestModule.moduleId, 'analyzing') } : current)
+    }
+    setAnalyzeProgress({ stage: 'starting', message: isModuleAnalysis ? `正在准备分析模块：${requestModule?.title}` : '正在准备分析请求' })
     try {
       const request = {
-        sessionId: activeDraft.sessionId,
+        sessionId: requestDraft.sessionId,
         aiKeyMode,
-        draftDocument: activeDraft,
-        analysisGoal: 'improve_clarity',
+        analysisScope: requestModule ? 'module' as const : 'document' as const,
+        targetModuleId: requestModule?.moduleId,
+        providerInteractionMode: requestModule ? 'chat_messages' as const : undefined,
+        moduleContext: requestModule ?? undefined,
+        draftDocument: requestDraft,
+        analysisGoal: requestModule ? `分析并优化模块：${requestModule.title}` : 'improve_clarity',
       }
       const response = await api.analyzeResumeStream(request, (event) => {
         setAnalyzeProgress({ stage: event.stage, message: localizeBackendText(event.message) })
@@ -441,15 +517,28 @@ function App() {
         }
         throw caught
       })
-      setSuggestions(response.suggestions)
-      setAnalyzeProgress({ stage: 'done', message: '简历分析完成' })
+      setSuggestions((current) => mergeSuggestions(current, response.suggestions, requestModule))
+      if (requestModule) {
+        const nextModuleStatus: ResumeModuleStatus = response.suggestions.length > 0 ? 'has_suggestions' : 'normal'
+        setDraftDocument((current) => current ? { ...current, modules: updateModuleStatus(getResumeModules(current), requestModule.moduleId, nextModuleStatus) } : current)
+      }
+      setAnalyzeProgress({ stage: 'done', message: isModuleAnalysis ? '模块分析完成' : '简历分析完成' })
       setStatus('editing')
     } catch (caught) {
       if (isUnauthorizedError(caught)) setNeedsAccessToken(true)
-      setStatus('failed')
-      setError(normalizeError(caught, 'AI 分析失败'))
+      if (caught instanceof ApiClientError && caught.code === 'ai_response_unparseable') {
+        setStatus('suggestion_extract_failed')
+        setError(normalizeError(caught, 'AI 回复无法转换成修改建议'))
+      } else {
+        setStatus('failed')
+        setError(normalizeError(caught, isModuleAnalysis ? '模块分析失败' : 'AI 分析失败'))
+      }
+      if (requestModule) {
+        setDraftDocument((current) => current ? { ...current, modules: updateModuleStatus(getResumeModules(current), requestModule.moduleId, 'needs_review') } : current)
+      }
       setAnalyzeProgress(null)
     } finally {
+      setAnalyzingModuleId(null)
       window.setTimeout(() => {
         setAnalyzeProgress((current) => (current?.stage === 'done' ? null : current))
       }, 1200)
@@ -561,6 +650,7 @@ function App() {
         hasUnconfirmedChanges: hasNeedsReviewItems(nextSections),
         updatedAt: new Date().toISOString(),
         sections: nextSections,
+        modules: updateModulesFromSections(current.modules, nextSections),
       }
     })
     setExportState(null)
@@ -571,28 +661,32 @@ function App() {
     setDraftDocument((current) => {
       if (!current) return current
       setDraftHistory((history) => [...history.slice(-9), current])
+      const nextSections = current.sections.map((section) => {
+        if (section.sectionId !== sectionId) return section
+        const item: ResumeItem = {
+          itemId: `local_${Date.now()}`,
+          sectionId,
+          itemType: itemTypeForSection(section.sectionType),
+          text: '',
+          fields: {},
+          order: section.items.length,
+          source: 'manual_edit',
+          status: 'normal',
+        }
+        const items = [...section.items, item]
+        return { ...section, status: 'normal' as const, items }
+      })
       return {
         ...current,
         revision: current.revision + 1,
-        hasUnconfirmedChanges: hasNeedsReviewItems(current.sections),
+        hasUnconfirmedChanges: hasNeedsReviewItems(nextSections),
         updatedAt: new Date().toISOString(),
-        sections: current.sections.map((section) => {
-          if (section.sectionId !== sectionId) return section
-          const item: ResumeItem = {
-            itemId: `local_${Date.now()}`,
-            sectionId,
-            itemType: itemTypeForSection(section.sectionType),
-            text: '',
-            fields: {},
-            order: section.items.length,
-            source: 'manual_edit',
-            status: 'normal',
-          }
-          const items = [...section.items, item]
-          return { ...section, status: 'normal' as const, items }
-        }),
+        sections: nextSections,
+        modules: updateModulesFromSections(current.modules, nextSections),
       }
     })
+    setExportState(null)
+    setBrowserPdfExport(null)
   }
 
   function removeItem(sectionId: string, itemId: string) {
@@ -615,6 +709,7 @@ function App() {
         hasUnconfirmedChanges: hasNeedsReviewItems(nextSections),
         updatedAt: new Date().toISOString(),
         sections: nextSections,
+        modules: updateModulesFromSections(current.modules, nextSections),
       }
     })
   }
@@ -631,35 +726,47 @@ function App() {
       return
     }
 
-    const targetExists = draftDocument.sections.some((section) => (
+    const targetSection = draftDocument.sections.find((section) => (
       section.items.some((item) => item.itemId === suggestion.targetItemId)
     ))
-    if (!targetExists) {
+    if (!targetSection) {
       setError({
         title: '这条建议不能直接应用',
         details: '这条建议没有找到对应的简历条目，请先手动编辑对应内容。',
       })
       return
     }
+    if (suggestion.analysisScope === 'module' && suggestion.targetModuleId) {
+      const targetModule = getResumeModules(draftDocument).find((module) => module.moduleId === suggestion.targetModuleId)
+      if (!targetModule || targetModule.sectionId !== targetSection.sectionId) {
+        setError({
+          title: '这条模块建议不能直接应用',
+          details: '单模块分析建议只能修改目标模块。涉及移动、拆分或合并时，需要你手动确认后再处理。',
+        })
+        return
+      }
+    }
 
+    const nextSections = draftDocument.sections.map((section) => ({
+      ...section,
+      status: section.sectionId === suggestion.targetSectionId && suggestion.needsUserConfirmation ? 'needs_review' as const : section.status,
+      items: section.items.map((item) => {
+        if (item.itemId !== suggestion.targetItemId) return item
+        return {
+          ...item,
+          text: suggestion.exampleRewrite ?? item.text,
+          source: 'ai_suggestion_applied' as const,
+          status: suggestion.needsUserConfirmation ? 'needs_review' as const : 'normal' as const,
+        }
+      }),
+    }))
     replaceDraftDocument({
       ...draftDocument,
       revision: draftDocument.revision + 1,
-      hasUnconfirmedChanges: suggestion.needsUserConfirmation || hasNeedsReviewItems(draftDocument.sections),
+      hasUnconfirmedChanges: suggestion.needsUserConfirmation || hasNeedsReviewItems(nextSections),
       updatedAt: new Date().toISOString(),
-      sections: draftDocument.sections.map((section) => ({
-        ...section,
-        status: section.sectionId === suggestion.targetSectionId && suggestion.needsUserConfirmation ? 'needs_review' as const : section.status,
-        items: section.items.map((item) => {
-          if (item.itemId !== suggestion.targetItemId) return item
-          return {
-            ...item,
-            text: suggestion.exampleRewrite ?? item.text,
-            source: 'ai_suggestion_applied' as const,
-            status: suggestion.needsUserConfirmation ? 'needs_review' as const : 'normal' as const,
-          }
-        }),
-      })),
+      sections: nextSections,
+      modules: updateModulesFromSections(draftDocument.modules, nextSections, suggestion.targetModuleId, 'applied'),
     })
     setSuggestions((current) => current.map((item) => (
       item.suggestionId === suggestion.suggestionId ? { ...item, status: 'applied' } : item
@@ -667,9 +774,29 @@ function App() {
   }
 
   function ignoreSuggestion(suggestionId: string) {
+    const ignoredSuggestion = suggestions.find((suggestion) => suggestion.suggestionId === suggestionId)
     setSuggestions((current) => current.map((item) => (
       item.suggestionId === suggestionId ? { ...item, status: 'ignored' } : item
     )))
+    const ignoredModuleId = ignoredSuggestion?.targetModuleId
+    if (ignoredModuleId) {
+      setDraftDocument((current) => {
+        if (!current) return current
+        const stillOpenForModule = suggestions.some((suggestion) => (
+          suggestion.suggestionId !== suggestionId
+          && suggestion.targetModuleId === ignoredModuleId
+          && (suggestion.status === 'open' || suggestion.status === 'blocked')
+        ))
+        return {
+          ...current,
+          modules: updateModuleStatus(
+            getResumeModules(current),
+            ignoredModuleId,
+            stillOpenForModule ? 'has_suggestions' : 'ignored',
+          ),
+        }
+      })
+    }
   }
 
   async function copySuggestionRewrite(suggestion: Suggestion) {
@@ -697,6 +824,7 @@ function App() {
             status: item.status === 'needs_review' ? 'normal' : item.status,
           })),
         })),
+        modules: markAllModulesFromSections(current.modules, current.sections),
       }
     })
     setExportState(null)
@@ -851,6 +979,8 @@ function App() {
     setExportState(null)
     setBrowserPdfExport(null)
     setResumeProfile(emptyResumeProfile)
+    setSelectedModuleId(null)
+    setAnalyzingModuleId(null)
   }
 
   return (
@@ -888,7 +1018,12 @@ function App() {
           <button className="button secondary" onClick={() => setAiSettingsOpen((current) => !current)} type="button">
             模型设置
           </button>
-          <button className="button primary" disabled={!canUseBackend || status === 'analyzing' || status === 'model_checking'} onClick={analyzeResume} type="button">
+          <button
+            className="button primary"
+            disabled={!canUseBackend || status === 'analyzing' || status === 'module_analyzing' || status === 'model_checking'}
+            onClick={() => void analyzeResume()}
+            type="button"
+          >
             {draftDocument ? '分析建议' : '解析并分析'}
           </button>
           <button className="button secondary" disabled={!draftDocument} onClick={() => void exportResume('pdf')} type="button">
@@ -993,18 +1128,24 @@ function App() {
                     onUpdate={updateResumeProfile}
                   />
                   <DraftEditor
+                    analyzingModuleId={analyzingModuleId}
                     draftDocument={draftDocument}
+                    moduleSuggestionCounts={moduleSuggestionCounts}
+                    modules={resumeModules}
                     onAddItem={addItem}
+                    onAnalyzeModule={(module) => void analyzeResume(module)}
                     onRemoveItem={removeItem}
+                    onSelectModule={setSelectedModuleId}
                     onUpdateItem={updateItemText}
                     onUndo={undoLastDraftChange}
                     canUndo={draftHistory.length > 0}
+                    selectedModuleId={selectedModule?.moduleId ?? null}
                   />
                 </>
               ) : (
                 <ImportPanel
                   fileName={fileName}
-                  onAnalyze={analyzeResume}
+                  onAnalyze={() => void analyzeResume()}
                   onSample={() => setResumeText(sampleResume)}
                   onTextChange={setResumeText}
                   resumeText={resumeText}
@@ -1038,6 +1179,7 @@ function App() {
             <PanelHeader eyebrow="AI suggestions" title="优化建议" meta={`${activeSuggestions.length} open`} />
             <SuggestionList
               manualApplyRequired={shouldRequireManualSuggestionApply}
+              modules={resumeModules}
               onApply={applySuggestion}
               onCopy={copySuggestionRewrite}
               onIgnore={ignoreSuggestion}
@@ -1342,19 +1484,31 @@ function ProfileEditor({
 }
 
 function DraftEditor({
+  analyzingModuleId,
   canUndo,
   draftDocument,
+  modules,
+  moduleSuggestionCounts,
   onAddItem,
+  onAnalyzeModule,
   onRemoveItem,
+  onSelectModule,
   onUndo,
   onUpdateItem,
+  selectedModuleId,
 }: {
+  analyzingModuleId: string | null
   canUndo: boolean
   draftDocument: DraftDocument
+  modules: ResumeModule[]
+  moduleSuggestionCounts: Record<string, number>
   onAddItem: (sectionId: string) => void
+  onAnalyzeModule: (module: ResumeModule) => void
   onRemoveItem: (sectionId: string, itemId: string) => void
+  onSelectModule: (moduleId: string) => void
   onUndo: () => void
   onUpdateItem: (sectionId: string, itemId: string, text: string) => void
+  selectedModuleId: string | null
 }) {
   return (
     <div className="draft-editor">
@@ -1364,8 +1518,16 @@ function DraftEditor({
           撤销最近操作
         </button>
       </div>
+      <ResumeModuleList
+        analyzingModuleId={analyzingModuleId}
+        modules={modules}
+        suggestionCounts={moduleSuggestionCounts}
+        selectedModuleId={selectedModuleId}
+        onAnalyzeModule={onAnalyzeModule}
+        onSelectModule={onSelectModule}
+      />
       {visibleSections(draftDocument).map((section) => (
-        <section className="section-editor" key={section.sectionId}>
+        <section className={sectionClassName(section, modules, selectedModuleId)} key={section.sectionId}>
           <div className="section-editor-head">
             <div>
               <span>{sectionTitle[section.sectionType] ?? section.title}</span>
@@ -1389,6 +1551,70 @@ function DraftEditor({
         </section>
       ))}
     </div>
+  )
+}
+
+function ResumeModuleList({
+  analyzingModuleId,
+  modules,
+  onAnalyzeModule,
+  onSelectModule,
+  selectedModuleId,
+  suggestionCounts,
+}: {
+  analyzingModuleId: string | null
+  modules: ResumeModule[]
+  onAnalyzeModule: (module: ResumeModule) => void
+  onSelectModule: (moduleId: string) => void
+  selectedModuleId: string | null
+  suggestionCounts: Record<string, number>
+}) {
+  if (modules.length === 0) {
+    return (
+      <section className="module-panel">
+        <div className="module-panel-head">
+          <strong>简历模块</strong>
+          <span>等待解析结果</span>
+        </div>
+        <p className="module-empty">解析成功后，这里会显示可单独分析的模块。</p>
+      </section>
+    )
+  }
+
+  return (
+    <section className="module-panel" aria-label="简历模块列表">
+      <div className="module-panel-head">
+        <strong>简历模块</strong>
+        <span>{modules.length} 个模块</span>
+      </div>
+      <div className="module-list">
+        {modules.map((module) => {
+          const isSelected = module.moduleId === selectedModuleId
+          const isAnalyzing = module.moduleId === analyzingModuleId
+          const suggestionCount = suggestionCounts[module.moduleId] ?? 0
+          return (
+            <article className={isSelected ? 'module-card selected' : 'module-card'} key={module.moduleId}>
+              <button className="module-card-main" onClick={() => onSelectModule(module.moduleId)} type="button">
+                <span>{moduleTypeLabel[module.moduleType] ?? module.moduleType}</span>
+                <strong>{module.title || moduleTypeLabel[module.moduleType] || '未命名模块'}</strong>
+                <small>
+                  {moduleStatusLabel[module.status] ?? '待确认'}
+                  {suggestionCount > 0 ? ` · ${suggestionCount} 条建议` : ''}
+                </small>
+              </button>
+              <button
+                className="button secondary small"
+                disabled={Boolean(analyzingModuleId)}
+                onClick={() => onAnalyzeModule(module)}
+                type="button"
+              >
+                {isAnalyzing ? '分析中' : '分析此模块'}
+              </button>
+            </article>
+          )
+        })}
+      </div>
+    </section>
   )
 }
 
@@ -1634,12 +1860,14 @@ function ResumePaperHeader({
 
 function SuggestionList({
   manualApplyRequired,
+  modules,
   onApply,
   onCopy,
   onIgnore,
   suggestions,
 }: {
   manualApplyRequired: boolean
+  modules: ResumeModule[]
   onApply: (suggestion: Suggestion) => void
   onCopy: (suggestion: Suggestion) => void
   onIgnore: (suggestionId: string) => void
@@ -1659,10 +1887,19 @@ function SuggestionList({
     <div className="suggestion-list">
       {suggestions.map((suggestion) => {
         const applyBlocker = getSuggestionApplyBlocker(suggestion, manualApplyRequired)
+        const targetModule = suggestion.targetModuleId ? modules.find((module) => module.moduleId === suggestion.targetModuleId) : null
         return (
           <article className={`suggestion-card ${suggestion.riskLevel}`} key={suggestion.suggestionId}>
             <div className="suggestion-head">
               <span className={`risk ${suggestion.riskLevel}`}>{riskLabel[suggestion.riskLevel]}</span>
+              <span className="risk module-tag">
+                {targetModule ? `目标：${targetModule.title}` : suggestion.targetModuleType ? `目标：${moduleTypeLabel[suggestion.targetModuleType] ?? suggestion.targetModuleType}` : '目标：整份简历'}
+              </span>
+              {suggestion.suggestedOperation && (
+                <span className="risk operation-tag">{operationLabel[suggestion.suggestedOperation]}</span>
+              )}
+              {suggestion.extractionStatus === 'partial' && <span className="risk confirm">部分提取</span>}
+              {suggestion.extractionStatus === 'failed' && <span className="risk high">提取失败</span>}
               {suggestion.needsUserConfirmation && <span className="risk confirm">需用户确认</span>}
             </div>
             <h3>{localizeBackendText(suggestion.issue)}</h3>
@@ -1799,6 +2036,149 @@ function hasNeedsReviewItems(sections: ResumeSection[]) {
   return sections.some((section) => (
     section.status === 'needs_review' || section.items.some((item) => item.status === 'needs_review')
   ))
+}
+
+function getResumeModules(draftDocument: DraftDocument | null): ResumeModule[] {
+  if (!draftDocument) return []
+  const modules = draftDocument.modules?.length
+    ? draftDocument.modules
+    : draftDocument.sections.map((section) => moduleFromSection(section, draftDocument.documentId))
+
+  return modules
+    .map((module) => syncModuleWithSection(module, draftDocument.sections.find((section) => section.sectionId === module.sectionId)))
+    .filter((module) => module.items.some((item) => item.status !== 'hidden') || module.currentText.trim())
+    .sort((left, right) => left.order - right.order)
+}
+
+function moduleFromSection(section: ResumeSection, documentId: string): ResumeModule {
+  return {
+    moduleId: `module_${section.sectionId}`,
+    documentId,
+    moduleType: section.sectionType as ResumeModuleType,
+    title: section.title || sectionTitle[section.sectionType] || '未命名模块',
+    sourceText: sectionText(section),
+    currentText: sectionText(section),
+    items: [...section.items],
+    sectionId: section.sectionId,
+    order: section.order,
+    status: section.status === 'needs_review' ? 'needs_review' : 'normal',
+    parseConfidence: 0.72,
+  }
+}
+
+function syncModuleWithSection(module: ResumeModule, section?: ResumeSection): ResumeModule {
+  if (!section) return module
+  const currentText = sectionText(section)
+  return {
+    ...module,
+    documentId: module.documentId || section.documentId,
+    moduleType: module.moduleType || section.sectionType,
+    title: module.title || section.title || sectionTitle[section.sectionType] || '未命名模块',
+    currentText,
+    items: section.items,
+    sectionId: section.sectionId,
+    order: section.order,
+    status: module.status === 'analyzing' || module.status === 'has_suggestions' || module.status === 'applied' || module.status === 'ignored'
+      ? module.status
+      : section.status === 'needs_review'
+        ? 'needs_review'
+        : module.status || 'normal',
+  }
+}
+
+function sectionText(section: ResumeSection) {
+  return section.items
+    .filter((item) => item.status !== 'hidden')
+    .sort((left, right) => left.order - right.order)
+    .map((item) => item.text.trim())
+    .filter(Boolean)
+    .join('\n')
+}
+
+function updateModulesFromSections(
+  existingModules: ResumeModule[] | undefined,
+  nextSections: ResumeSection[],
+  highlightedModuleId?: string,
+  highlightedStatus?: ResumeModuleStatus,
+): ResumeModule[] {
+  const existingBySectionId = new Map((existingModules ?? []).map((module) => [module.sectionId, module]))
+  return nextSections
+    .map((section) => {
+      const existing = existingBySectionId.get(section.sectionId)
+      const module = existing
+        ? syncModuleWithSection(existing, section)
+        : moduleFromSection(section, section.documentId)
+      if (highlightedModuleId && module.moduleId === highlightedModuleId && highlightedStatus) {
+        return { ...module, status: highlightedStatus }
+      }
+      if (highlightedStatus === 'applied' && module.status === 'has_suggestions') return { ...module, status: 'normal' as const }
+      return module
+    })
+    .sort((left, right) => left.order - right.order)
+}
+
+function updateModuleStatus(modules: ResumeModule[], moduleId: string, status: ResumeModuleStatus) {
+  return modules.map((module) => (
+    module.moduleId === moduleId ? { ...module, status } : module
+  ))
+}
+
+function markAllModulesFromSections(existingModules: ResumeModule[] | undefined, sections: ResumeSection[]) {
+  return updateModulesFromSections(existingModules, sections).map((module) => ({
+    ...module,
+    status: module.status === 'needs_review' || module.status === 'has_suggestions' ? 'normal' as const : module.status,
+  }))
+}
+
+function mergeSuggestions(current: Suggestion[], incoming: Suggestion[], targetModule?: ResumeModule | null) {
+  const normalizedIncoming = incoming.map((suggestion) => normalizeIncomingSuggestion(suggestion, targetModule))
+  if (!targetModule) return normalizedIncoming
+
+  const replacedSuggestionIds = new Set(normalizedIncoming.map((suggestion) => suggestion.suggestionId))
+  return [
+    ...current.filter((suggestion) => {
+      if (replacedSuggestionIds.has(suggestion.suggestionId)) return false
+      if (suggestion.targetModuleId !== targetModule.moduleId) return true
+      return suggestion.status === 'applied' || suggestion.status === 'ignored'
+    }),
+    ...normalizedIncoming,
+  ]
+}
+
+function normalizeIncomingSuggestion(suggestion: Suggestion, targetModule?: ResumeModule | null): Suggestion {
+  if (!targetModule) {
+    return {
+      ...suggestion,
+      status: suggestion.status ?? 'open',
+    }
+  }
+
+  const pointsOutsideTarget = Boolean(suggestion.targetModuleId && suggestion.targetModuleId !== targetModule.moduleId)
+    || Boolean(suggestion.targetSectionId && suggestion.targetSectionId !== targetModule.sectionId)
+  return {
+    ...suggestion,
+    analysisScope: 'module',
+    targetModuleId: suggestion.targetModuleId ?? targetModule.moduleId,
+    targetModuleType: suggestion.targetModuleType ?? targetModule.moduleType,
+    status: pointsOutsideTarget ? 'blocked' : suggestion.status ?? 'open',
+    blockedReason: pointsOutsideTarget
+      ? suggestion.blockedReason ?? '这条建议指向了当前分析模块之外的内容，不能一键应用。'
+      : suggestion.blockedReason,
+  }
+}
+
+function getModuleSuggestionCounts(modules: ResumeModule[], suggestions: Suggestion[]) {
+  const counts: Record<string, number> = Object.fromEntries(modules.map((module) => [module.moduleId, 0]))
+  suggestions.forEach((suggestion) => {
+    if (!suggestion.targetModuleId) return
+    counts[suggestion.targetModuleId] = (counts[suggestion.targetModuleId] ?? 0) + 1
+  })
+  return counts
+}
+
+function sectionClassName(section: ResumeSection, modules: ResumeModule[], selectedModuleId: string | null) {
+  const module = modules.find((item) => item.sectionId === section.sectionId)
+  return module?.moduleId === selectedModuleId ? 'section-editor selected-module' : 'section-editor'
 }
 
 function updateInsertedProposalText(draftDocument: DraftDocument, sectionId: string, text: string) {
@@ -2225,6 +2605,11 @@ function isSafeSuggestionRewrite(rewrite: string | null | undefined) {
 
 function getSuggestionApplyBlocker(suggestion: Suggestion, manualApplyRequired = false) {
   if (manualApplyRequired) return '当前模型只通过基础能力检测，不能一键应用建议。请复制改写后手动确认并编辑。'
+  if (suggestion.status === 'blocked') return '后端已阻断这条建议的一键应用，请按建议说明手动处理。'
+  if (suggestion.extractionStatus === 'failed') return 'AI 回复没有被可靠提取成结构化建议，请重试或更换模型。'
+  if (suggestion.suggestedOperation === 'move_to_module') return '这条建议涉及移动到其他模块，需要你确认目标模块，暂不能一键应用。'
+  if (suggestion.suggestedOperation === 'split_module') return '这条建议涉及拆分模块，需要先查看差异，暂不能一键应用。'
+  if (suggestion.suggestedOperation === 'merge_with_module') return '这条建议涉及合并模块，需要先查看差异，暂不能一键应用。'
   if (!suggestion.targetItemId) return '这条建议没有绑定到具体简历条目，需要手动编辑对应内容。'
   if (!suggestion.exampleRewrite?.trim()) return '这条建议没有可直接写入简历的改写文本。'
   if (!isSafeSuggestionRewrite(suggestion.exampleRewrite)) return '建议改写里仍包含提示语，需要先手动改成可以直接进入简历的成品句。'

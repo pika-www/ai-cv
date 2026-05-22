@@ -16,9 +16,21 @@ export type ResumeSectionStatus = 'normal' | 'needs_review' | 'empty' | 'hidden'
 export type ResumeItemType = 'field' | 'paragraph' | 'list_item' | 'experience_entry' | 'skill_group'
 export type ResumeItemSource = 'uploaded_resume' | 'pasted_resume' | 'manual_edit' | 'ai_suggestion_applied' | 'new_experience_inserted'
 export type ResumeItemStatus = 'normal' | 'needs_review' | 'empty' | 'hidden'
+export type ResumeModuleType = ResumeSectionType | 'unknown'
+export type ResumeModuleStatus = 'normal' | 'needs_review' | 'analyzing' | 'has_suggestions' | 'applied' | 'ignored' | 'unknown'
 export type RiskLevel = 'low' | 'medium' | 'high'
 export type SuggestionStatus = 'open' | 'applied' | 'ignored' | 'edited_by_user' | 'blocked'
 export type SuggestionSource = 'ai_provider' | 'local_development_fallback'
+export type AnalysisScope = 'document' | 'module'
+export type ProviderInteractionMode = 'chat_messages' | 'structured_json'
+export type SuggestionExtractionStatus = 'succeeded' | 'partial' | 'failed'
+export type SuggestedOperation =
+  | 'rewrite_in_place'
+  | 'split_into_bullets'
+  | 'move_to_module'
+  | 'split_module'
+  | 'merge_with_module'
+  | 'delete_from_module'
 export type InsertPosition = 'end'
 export type InsertProposalStatus = 'proposed' | 'accepted' | 'edited' | 'rejected' | 'blocked'
 export type AiKeyMode = 'owner_default' | 'user_session_key' | 'not_configured'
@@ -122,12 +134,27 @@ export type ResumeSection = {
   status: ResumeSectionStatus
 }
 
+export type ResumeModule = {
+  moduleId: string
+  documentId: string
+  moduleType: ResumeModuleType
+  title: string
+  sourceText: string
+  currentText: string
+  items: ResumeItem[]
+  sectionId: string
+  order: number
+  status: ResumeModuleStatus
+  parseConfidence: number
+}
+
 export type DraftDocument = {
   documentId: string
   sessionId: string
   sourceResumeId?: string
   language: Locale
   templateId: string
+  modules?: ResumeModule[]
   sections: ResumeSection[]
   revision: number
   hasUnconfirmedChanges: boolean
@@ -138,17 +165,24 @@ export type Suggestion = {
   suggestionId: string
   sessionId: string
   documentId: string
+  analysisScope?: AnalysisScope
+  targetModuleId?: string
+  targetModuleType?: ResumeModuleType
   targetSectionId?: string
   targetItemId?: string
   targetText?: string
   issue: string
   recommendation: string
   exampleRewrite?: string
+  suggestedOperation?: SuggestedOperation
+  destinationModuleType?: ResumeModuleType
   riskLevel: RiskLevel
   needsUserConfirmation: boolean
   needsUserInput?: boolean
   questions?: string[]
   source?: SuggestionSource
+  extractionStatus?: SuggestionExtractionStatus
+  rawReplyAvailable?: boolean
   blockedReason?: string
   status: SuggestionStatus
   createdAt: string
@@ -336,6 +370,7 @@ export type ParseResumeResponse = {
   sourceDocument: SourceDocument
   draftDocument: DraftDocument
   sections: ResumeSection[]
+  modules?: ResumeModule[]
   warnings: string[]
   parseStatus?: string
   fallbackAction?: string
@@ -383,6 +418,8 @@ export type AnalyzeResumeResponse = {
   sessionId: string
   documentId: string
   suggestions: Suggestion[]
+  analysisScope?: AnalysisScope
+  targetModuleId?: string
   promptVersion: string
   modelProvider: string
   modelName: string
@@ -391,6 +428,10 @@ export type AnalyzeResumeResponse = {
 export type AnalyzeResumeRequest = {
   sessionId: string
   aiKeyMode?: AiKeyMode
+  analysisScope?: AnalysisScope
+  targetModuleId?: string
+  providerInteractionMode?: ProviderInteractionMode
+  moduleContext?: ResumeModule
   draftDocument: DraftDocument
   analysisGoal?: string
 }
