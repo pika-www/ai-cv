@@ -666,7 +666,7 @@ function App() {
     setStatus('exporting')
     if (format === 'pdf') {
       const printExport = {
-        fileName: draftPdfFileName(draftDocument),
+        fileName: draftPdfFileName(draftDocument, resumeProfile),
         contentType: 'application/pdf; rendered-from-preview',
         createdAt: new Date().toISOString(),
       }
@@ -2133,9 +2133,25 @@ function uploadExtractionFallbackDetails(extension: string) {
   return '这个文件没有读出足够的可用正文。请补充简历内容，或复制完整正文后粘贴。'
 }
 
-function draftPdfFileName(draftDocument: DraftDocument) {
+function draftPdfFileName(draftDocument: DraftDocument, profile: ResumeProfile) {
   const date = new Date().toISOString().slice(0, 10).replaceAll('-', '')
-  return `${date}-${draftDocument.documentId}-r${draftDocument.revision}.pdf`
+  const identity = [profile.fullName, profile.targetRole]
+    .map((item) => fileNameSegment(item))
+    .filter(Boolean)
+    .slice(0, 2)
+    .join('-')
+  const prefix = identity || 'resume'
+  return `${date}-${prefix}-${draftDocument.documentId}-r${draftDocument.revision}.pdf`
+}
+
+function fileNameSegment(value: string) {
+  return value
+    .trim()
+    .replace(/[\\/:*?"<>|#%{}$!'@+`=]/g, ' ')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 36)
 }
 
 function printPreviewAsPdf(fileName: string) {
