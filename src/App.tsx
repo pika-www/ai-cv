@@ -1376,16 +1376,26 @@ function AiProviderPanel({
               <span>model</span>
               <input value={form.model} onChange={(event) => onUpdate('model', event.target.value)} placeholder="gpt-5.5" />
             </label>
-            <label>
+            <label htmlFor="ai-provider-wire-api">
               <span>wire API</span>
-              <select value={form.wireApi} onChange={(event) => onUpdate('wireApi', event.target.value)}>
+              <select
+                aria-label="wire API"
+                id="ai-provider-wire-api"
+                value={form.wireApi}
+                onChange={(event) => onUpdate('wireApi', event.target.value)}
+              >
                 <option value="responses">Responses</option>
                 <option value="chat_completions">Chat Completions</option>
               </select>
             </label>
-            <label>
+            <label htmlFor="ai-provider-response-format">
               <span>response format</span>
-              <select value={form.responseFormat} onChange={(event) => onUpdate('responseFormat', event.target.value)}>
+              <select
+                aria-label="response format"
+                id="ai-provider-response-format"
+                value={form.responseFormat}
+                onChange={(event) => onUpdate('responseFormat', event.target.value)}
+              >
                 <option value="auto">Auto</option>
                 <option value="json_schema">JSON Schema</option>
                 <option value="json_object">JSON Object</option>
